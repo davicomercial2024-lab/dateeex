@@ -66,6 +66,8 @@ export function Topbar({ user, organization, onOpenMobileSidebar }: TopbarProps)
   const getPageTitle = () => {
     if (pathname === "/configuracoes") return "Diagnostico";
     if (pathname === "/configuracoes/contas-mercado-livre") return "Contas Mercado Livre";
+    if (pathname === "/promocoes") return "Promocoes";
+    if (pathname.startsWith("/promocoes")) return "Promocoes";
     if (pathname.startsWith("/configuracoes")) return "Configuracoes";
 
     const route = pathname.split("/")[1] || "";
@@ -78,6 +80,8 @@ export function Topbar({ user, organization, onOpenMobileSidebar }: TopbarProps)
         return "Vendas";
       case "reputacao":
         return "Reputacao";
+      case "publicidade":
+        return "Publicidade";
       case "ia":
         return "Inteligencia Artificial";
       default:

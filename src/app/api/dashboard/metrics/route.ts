@@ -61,6 +61,7 @@ export async function GET(request: Request) {
     let listingAccountFilter: { organizationId: string; mercadoLivreAccountId?: string } = {
       organizationId: orgId,
     };
+    let promotionFilter: { organizationId: string } = { organizationId: orgId };
 
     if (accountId !== "all") {
       // Valida que a conta pertence à organização
@@ -112,6 +113,8 @@ export async function GET(request: Request) {
       activeClaims,
       cancelledOrders,
       lateShipments,
+      activePromotions,
+      activeCampaigns,
       latestReputation,
     ] = await Promise.all([
       // Vendas hoje (COUNT)
@@ -180,6 +183,16 @@ export async function GET(request: Request) {
             lt: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000),
           },
         },
+      }),
+
+      // Promoções ativas
+      prisma.promotion.count({
+        where: { ...promotionFilter, status: "active" },
+      }),
+
+      // Campanhas Ads ativas
+      prisma.advertisingCampaign.count({
+        where: { organizationId: orgId, status: "active" },
       }),
 
       // Última reputação registrada
@@ -279,6 +292,17 @@ export async function GET(request: Request) {
       }
     }
 
+    // Promoções por status
+    const promotionStatusGroups = await prisma.promotion.groupBy({
+      by: ["status"],
+      where: promotionFilter,
+      _count: { id: true },
+    });
+    const promotionsByStatus = promotionStatusGroups.map((g) => ({
+      status: g.status,
+      count: g._count.id,
+    }));
+
     // -------------------------------------------------------------------------
     // 3. MONTA RESPOSTA FINAL
     // -------------------------------------------------------------------------
@@ -295,6 +319,8 @@ export async function GET(request: Request) {
         activeClaims,
         cancelledOrders,
         lateShipments,
+        activePromotions,
+        activeCampaigns,
         reputation: latestReputation
           ? {
               levelId: latestReputation.levelId,
@@ -311,6 +337,7 @@ export async function GET(request: Request) {
         salesByDay,
         listingsByStatus,
         performanceByAccount,
+        promotionsByStatus,
       },
     });
   } catch (error: any) {

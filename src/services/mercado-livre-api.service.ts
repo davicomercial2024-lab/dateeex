@@ -90,6 +90,22 @@ export interface MeliQuestionPayload {
   date_created: string;
 }
 
+export interface MeliPromotionPayload {
+  id: string;
+  name: string;
+  type: string;
+  status: string;
+  start_date: string;
+  deadline_date: string;
+}
+
+export interface MeliCampaignPayload {
+  id: number;
+  name: string;
+  status: string;
+  daily_budget: number;
+}
+
 export interface MeliAdvertisingAdvertiser {
   advertiser_id: number;
   site_id: string;
@@ -503,6 +519,89 @@ export class MercadoLivreApiService {
   }
 
   /**
+   * Busca promoções ativas associadas ao catálogo
+   */
+  static async fetchPromotions(meliUserId: string, accessToken: string): Promise<MeliPromotionPayload[]> {
+    interface SearchResult {
+      results: MeliPromotionPayload[];
+    }
+    
+    // Endpoint oficial do Meli para seller promotions
+    try {
+      const searchRes = await this.request<SearchResult>(
+        `/seller-promotions/users/${meliUserId}?limit=50`,
+        accessToken
+      );
+      return searchRes.results || [];
+    } catch (err) {
+      console.warn("Erro ao buscar promoções de seller promotions: ", err);
+      // Se falhar ou não estiver disponível para a conta sandbox, retorna vazio
+      return [];
+    }
+  }
+
+  /**
+   * Busca campanhas de Product Ads associadas ao vendedor (quando disponível)
+   */
+  static async fetchCampaigns(meliUserId: string, accessToken: string): Promise<MeliCampaignPayload[]> {
+    interface SearchResult {
+      results: MeliCampaignPayload[];
+    }
+
+    // Endpoint de product ads do Meli
+    try {
+      const searchRes = await this.request<SearchResult>(
+        `/advertising/product-ads/campaigns/search?seller_id=${meliUserId}`,
+        accessToken
+      );
+      return searchRes.results || [];
+    } catch (err) {
+      console.warn("Erro ao buscar campanhas de Ads: ", err);
+      // Retorna vazio se a conta não estiver qualificada ou a API retornar indisponível
+      return [];
+    }
+  }
+
+  /**
+   * Atualiza uma campanha de Product Ads (status, orçamento, objetivo/target_acos)
+   */
+  static async updateCampaign(
+    campaignId: number,
+    accessToken: string,
+    payload: { status?: string; daily_budget?: number; target_acos?: number }
+  ): Promise<any> {
+    const url = `/advertising/product-ads/campaigns/${campaignId}`;
+    try {
+      return await this.request(url, accessToken, {
+        method: "PUT",
+        body: JSON.stringify(payload),
+      });
+    } catch (err: any) {
+      console.error(`Erro ao atualizar campanha ${campaignId}:`, err);
+      throw new Error(err.message || "Falha ao atualizar campanha no Mercado Livre.");
+    }
+  }
+
+  /**
+   * Busca métricas agregadas de Ads para uma campanha num período
+   */
+  static async fetchCampaignMetrics(
+    campaignId: number,
+    accessToken: string,
+    dateFrom: string,
+    dateTo: string
+  ): Promise<any> {
+    const url = `/advertising/product-ads/metrics/campaigns/${campaignId}?date_from=${dateFrom}&date_to=${dateTo}`;
+    try {
+      return await this.request(url, accessToken);
+    } catch (err) {
+      console.warn(`Erro ao buscar métricas da campanha ${campaignId}:`, err);
+      // Retorna objeto zerado em caso de erro para não quebrar a tela
+      return { clicks: 0, impressions: 0, cost: 0, sales_amount: 0, sales_quantity: 0, acos: 0 };
+    }
+  }
+
+  /**
    * Busca a saúde (health/qualidade) de múltiplos anúncios.
    */
   static async fetchItemsHealth(itemIds: string[], accessToken: string): Promise<any[]> {
@@ -528,6 +627,92 @@ export class MercadoLivreApiService {
       });
     } catch (err: any) {
       throw new Error(`Erro ao atualizar status do anúncio ${itemId}: ${err.message}`);
+    }
+  }
+
+  /**
+   * Busca campanhas de promoção disponíveis para o seller (V2)
+   */
+  static async fetchSellerPromotionsV2(meliUserId: string, accessToken: string): Promise<any[]> {
+    try {
+      const res = await this.request<any>(
+        `/seller-promotions/users/${meliUserId}?app_version=v2&limit=50`, 
+        accessToken
+      );
+      return res.results || [];
+    } catch (err) {
+      console.warn("Erro ao buscar promotions V2:", err);
+      return [];
+    }
+  }
+
+  /**
+   * Aplica um desconto a um item em uma promoção (V2)
+   */
+  static async applyPromotion(
+    itemId: string, 
+    promotionId: string, 
+    promotionType: string, 
+    data: { dealPrice?: number; discountPercent?: number; quantity?: number }, 
+    accessToken: string
+  ): Promise<any> {
+    try {
+      let body: any = {
+        promotion_id: promotionId,
+        promotion_type: promotionType
+      };
+
+      // Adequa o payload conforme o tipo da promoção do ML
+      switch (promotionType) {
+        case "DEAL":
+        case "LIGHTNING":
+        case "DOD":
+          body.deal_price = data.dealPrice;
+          break;
+        case "VOLUME":
+          body.discount_percent = data.discountPercent;
+          body.quantity = data.quantity;
+          break;
+        case "PRICE_DISCOUNT":
+          // O price_discount pode exigir 'price' ao invés de 'deal_price', dependendo da doc atualizada. 
+          // Mas na v2 seller-promotions, geralmente é discount_percent ou price.
+          if (data.discountPercent) body.discount_percent = data.discountPercent;
+          if (data.dealPrice) body.price = data.dealPrice;
+          break;
+        case "MARKETPLACE_CAMPAIGN":
+        case "SMART":
+        case "PRICE_MATCHING":
+        default:
+          // Muitas vezes campanhas co-financiadas e smart só exigem aceitar (apenas enviar o id e type)
+          break;
+      }
+
+      return await this.request(`/seller-promotions/items/${itemId}`, accessToken, {
+        method: "POST",
+        body: JSON.stringify(body)
+      });
+    } catch (err: any) {
+      throw new Error(`Erro ao aplicar promoção no anúncio ${itemId}: ${err.message}`);
+    }
+  }
+
+  /**
+   * Remove um item de uma promoção (Sair da campanha)
+   */
+  static async deletePromotion(
+    itemId: string, 
+    promotionId: string, 
+    promotionType: string, 
+    accessToken: string
+  ): Promise<any> {
+    try {
+      return await this.request(
+        `/seller-promotions/items/${itemId}?promotion_id=${promotionId}&promotion_type=${promotionType}`, 
+        accessToken, 
+        { method: "DELETE" }
+      );
+    } catch (err: any) {
+      throw new Error(`Erro ao remover anúncio ${itemId} da promoção: ${err.message}`);
     }
   }
 

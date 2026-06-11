@@ -12,6 +12,8 @@ export interface SyncReport {
   ordersCount: number;
   questionsCount: number;
   reputationLevel?: string;
+  promotionsCount: number;
+  campaignsCount: number;
 }
 
 export class MercadoLivreSyncService {
@@ -38,6 +40,8 @@ export class MercadoLivreSyncService {
       listingsCount: 0,
       ordersCount: 0,
       questionsCount: 0,
+      promotionsCount: 0,
+      campaignsCount: 0,
     };
 
     // 1. Carrega a conta e o token do banco
@@ -375,7 +379,80 @@ export class MercadoLivreSyncService {
 
     await this.reportProgress(onProgress, 80);
 
+    // --- 3.5 Promoções (Promotions) ---
+    try {
+      if (!isMock) {
+        const promos = await MercadoLivreApiService.fetchPromotions(account.meliUserId, accessToken);
+
+        for (const promo of promos) {
+          await prisma.promotion.upsert({
+            where: {
+              organizationId_mlPromotionId: {
+                organizationId,
+                mlPromotionId: promo.id,
+              },
+            },
+            update: {
+              name: promo.name || "Promoção sem nome",
+              type: promo.type || "deal",
+              status: promo.status || "active",
+              startDate: new Date(promo.start_date),
+              endDate: new Date(promo.deadline_date),
+            },
+            create: {
+              organizationId,
+              mlPromotionId: promo.id,
+              name: promo.name || "Promoção sem nome",
+              type: promo.type || "deal",
+              status: promo.status || "active",
+              startDate: new Date(promo.start_date),
+              endDate: new Date(promo.deadline_date),
+            },
+          });
+          report.promotionsCount++;
+        }
+      }
+    } catch (err: any) {
+      report.errors.push(`Erro ao sincronizar promoções: ${err.message || err}`);
+    }
+
     await this.reportProgress(onProgress, 90);
+
+    // --- 3.6 Campanhas Ads (Advertising Campaigns) ---
+    try {
+      if (!isMock) {
+        const campaigns = await MercadoLivreApiService.fetchCampaigns(account.meliUserId, accessToken);
+
+        for (const camp of campaigns) {
+          await prisma.advertisingCampaign.upsert({
+            where: {
+              organizationId_mlCampaignId: {
+                organizationId,
+                mlCampaignId: camp.id.toString(),
+              },
+            },
+            update: {
+              name: camp.name || "Campanha Product Ads",
+              status: camp.status || "active",
+              budget: camp.daily_budget || 0,
+            },
+            create: {
+              organizationId,
+              mlCampaignId: camp.id.toString(),
+              name: camp.name || "Campanha Product Ads",
+              status: camp.status || "active",
+              budget: camp.daily_budget || 0,
+              budgetType: "daily",
+            },
+          });
+          report.campaignsCount++;
+        }
+      }
+    } catch (err: any) {
+      report.errors.push(`Erro ao sincronizar campanhas Ads: ${err.message || err}`);
+    }
+
+    await this.reportProgress(onProgress, 95);
 
     // 4. Consolida e registra auditoria final
     report.success = report.errors.length === 0;
@@ -384,7 +461,8 @@ export class MercadoLivreSyncService {
     const detailsSummary = `Sincronização concluída para a conta '${
       account.nickname
     }'. Resumo: ${report.listingsCount} anúncios, ${report.ordersCount} vendas, ${
-      report.questionsCount} perguntas. Erros isolados: ${report.errors.length}`;
+      report.questionsCount} perguntas, ${report.promotionsCount} promoções, ${
+      report.campaignsCount} campanhas Ads. Erros isolados: ${report.errors.length}`;
 
     await this.logAudit(
       organizationId,

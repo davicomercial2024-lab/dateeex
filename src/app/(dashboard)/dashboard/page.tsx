@@ -12,6 +12,7 @@ import {
   AlertTriangle,
   XCircle,
   Truck,
+  Megaphone,
   BarChart2,
   Star,
   RefreshCw,
@@ -60,6 +61,8 @@ interface DashboardCards {
   activeClaims: number;
   cancelledOrders: number;
   lateShipments: number;
+  activePromotions: number;
+  activeCampaigns: number;
   reputation: {
     levelId: string | null;
     powerSellerStatus: string | null;
@@ -75,6 +78,7 @@ interface DashboardCharts {
   salesByDay: Array<{ date: string; count: number }>;
   listingsByStatus: Array<{ status: string; count: number }>;
   performanceByAccount: Array<{ nickname: string; revenue: number; orders: number }>;
+  promotionsByStatus: Array<{ status: string; count: number }>;
 }
 
 interface DashboardData {
@@ -108,6 +112,12 @@ const REPUTATION_MAP: Record<string, { label: string; color: string; bg: string 
   "3_yellow":  { label: "Amarelo — Regular", color: "#f59e0b", bg: "bg-amber-500/10 text-amber-500 border-amber-500/20" },
   "2_orange":  { label: "Laranja — Ruim", color: "#f97316", bg: "bg-orange-500/10 text-orange-500 border-orange-500/20" },
   "1_red":     { label: "Vermelho — Crítico", color: "#ef4444", bg: "bg-red-500/10 text-red-500 border-red-500/20" },
+};
+
+const PROMOTION_STATUS_LABELS: Record<string, string> = {
+  active: "Ativas",
+  pending: "Pendentes",
+  finished: "Encerradas",
 };
 
 const LISTING_STATUS_LABELS: Record<string, string> = {
@@ -513,9 +523,9 @@ export default function DashboardPage() {
           Catálogo & Anúncios
         </h2>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
           {isLoading ? (
-            Array.from({ length: 2 }).map((_, i) => <MetricCardSkeleton key={i} />)
+            Array.from({ length: 4 }).map((_, i) => <MetricCardSkeleton key={i} />)
           ) : (
             <>
               <MetricCard
@@ -532,6 +542,20 @@ export default function DashboardPage() {
                 sub="aguardando reativação"
                 alert={(cards?.pausedListings ?? 0) > 0}
                 color="text-amber-500"
+              />
+              <MetricCard
+                icon={Megaphone}
+                label="Promoções Ativas"
+                value={formatNumber(cards?.activePromotions ?? 0)}
+                sub="campanhas em andamento"
+                color="text-pink-500"
+              />
+              <MetricCard
+                icon={BarChart2}
+                label="Campanhas Ads"
+                value={formatNumber(cards?.activeCampaigns ?? 0)}
+                sub="product ads ativas"
+                color="text-indigo-500"
               />
             </>
           )}
@@ -772,7 +796,7 @@ export default function DashboardPage() {
           Distribuições & Composição
         </h2>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-2 gap-6">
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
           {/* Status dos Anúncios */}
           <Card className="border-border/60 bg-card/60 backdrop-blur-sm">
             <CardHeader className="pb-3 border-b border-border/30">
@@ -826,6 +850,68 @@ export default function DashboardPage() {
                           style={{ background: CHART_COLORS[index % CHART_COLORS.length] }}
                         />
                         {LISTING_STATUS_LABELS[entry.status] || entry.status}:{" "}
+                        <span className="text-foreground font-bold">{formatNumber(entry.count)}</span>
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          {/* Promoções por Status */}
+          <Card className="border-border/60 bg-card/60 backdrop-blur-sm">
+            <CardHeader className="pb-3 border-b border-border/30">
+              <CardTitle className="text-sm font-bold flex items-center gap-2">
+                <Megaphone className="w-4 h-4 text-pink-500" />
+                Promoções por Status
+              </CardTitle>
+              <CardDescription className="text-xs">
+                Visão geral do catálogo de promoções
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="pt-4">
+              {isLoading ? (
+                <Skeleton className="h-[200px] w-full" />
+              ) : !charts?.promotionsByStatus?.length ? (
+                <ChartEmptyState message="Nenhuma promoção registrada." />
+              ) : (
+                <div className="flex flex-col gap-4">
+                  <ResponsiveContainer width="100%" height={160}>
+                    <PieChart>
+                      <Pie
+                        data={charts.promotionsByStatus}
+                        dataKey="count"
+                        nameKey="status"
+                        cx="50%"
+                        cy="50%"
+                        innerRadius={45}
+                        outerRadius={70}
+                        paddingAngle={3}
+                      >
+                        {charts.promotionsByStatus.map((entry, index) => (
+                          <Cell key={index} fill={CHART_COLORS[index % CHART_COLORS.length]} />
+                        ))}
+                      </Pie>
+                      <Tooltip
+                        formatter={(value: any, name: any) => [
+                          formatNumber(Number(value)),
+                          PROMOTION_STATUS_LABELS[String(name)] || String(name),
+                        ]}
+                      />
+                    </PieChart>
+                  </ResponsiveContainer>
+                  <div className="flex flex-wrap gap-2 justify-center">
+                    {charts.promotionsByStatus.map((entry, index) => (
+                      <span
+                        key={index}
+                        className="flex items-center gap-1.5 text-[10px] font-semibold text-muted-foreground"
+                      >
+                        <span
+                          className="w-2 h-2 rounded-full shrink-0"
+                          style={{ background: CHART_COLORS[index % CHART_COLORS.length] }}
+                        />
+                        {PROMOTION_STATUS_LABELS[entry.status] || entry.status}:{" "}
                         <span className="text-foreground font-bold">{formatNumber(entry.count)}</span>
                       </span>
                     ))}
