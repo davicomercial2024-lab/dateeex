@@ -1,0 +1,392 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+// -----------------------------------------------------------------------------
+// 1. USUÁRIOS E ORGANIZAÇÕES
+// -----------------------------------------------------------------------------
+
+model User {
+  id           String               @id @default(uuid())
+  email        String               @unique
+  passwordHash String
+  name         String?
+  createdAt    DateTime             @default(now())
+  updatedAt    DateTime             @updatedAt
+  memberships  OrganizationMember[]
+  auditLogs    AuditLog[]
+}
+
+model Organization {
+  id                   String                 @id @default(uuid())
+  name                 String
+  createdAt            DateTime               @default(now())
+  updatedAt            DateTime               @updatedAt
+  members              OrganizationMember[]
+  meliAccounts         MercadoLivreAccount[]
+  listings             Listing[]
+  orders               Order[]
+  questions            Question[]
+  claims               Claim[]
+  reputations          SellerReputation[]
+  metricSnapshots      MetricSnapshot[]
+  aiAnalyses           AIAnalysis[]
+  auditLogs            AuditLog[]
+}
+
+model OrganizationMember {
+  id             String       @id @default(uuid())
+  organizationId String
+  userId         String
+  role           String       @default("MEMBER") // ADMIN, MEMBER, VIEWER
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, userId])
+  @@index([organizationId])
+  @@index([userId])
+}
+
+// -----------------------------------------------------------------------------
+// 2. INTEGRAÇÃO E AUTENTICAÇÃO MERCADO LIVRE
+// -----------------------------------------------------------------------------
+
+model MercadoLivreAccount {
+  id                String    @id @default(uuid())
+  organizationId    String
+  meliUserId        String    // ID numérico real do ML (ex: 123456789)
+  nickname          String    // Nickname oficial retornado pelo ML /users/me
+  nicknameCustom    String?   // Apelido interno editável pelo usuário
+  email             String?
+  siteId            String?   // MLB (Brasil), MLA (Argentina), etc.
+  countryId         String?   // BR, AR, etc.
+  status            String    @default("CONNECTED") // CONNECTED, EXPIRED, ERROR, DISCONNECTED
+  isActive          Boolean   @default(true)        // false = desconectada (soft delete)
+  isDefault         Boolean   @default(false)       // conta padrão da organização
+  lastSyncAt        DateTime?
+  lastSyncStatus    String?   // SUCCESS, PARTIAL, FAILED, SYNCING
+  lastSyncProgress  Int       @default(0)
+  lastSyncError     String?
+  connectedAt       DateTime  @default(now())
+  disconnectedAt    DateTime?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  organization       Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  token              OAuthToken?
+
+  listings           Listing[]
+  orders             Order[]
+  questions          Question[]
+  claims             Claim[]
+  reputations        SellerReputation[]
+  metricSnapshots    MetricSnapshot[]
+  aiAnalyses         AIAnalysis[]
+  auditLogs          AuditLog[]
+
+  @@unique([organizationId, meliUserId])
+  @@index([organizationId])
+  @@index([meliUserId])
+  @@index([isActive])
+  @@index([isDefault])
+}
+
+model OAuthToken {
+  id                    String              @id @default(uuid())
+  mercadoLivreAccountId String              @unique
+  accessToken           String              // Armazenar token completo
+  refreshToken          String              // Armazenar token completo
+  expiresAt             DateTime
+  scope                 String?             // Escopos autorizados pelo usuário
+  tokenType             String?             @default("bearer")
+  createdAt             DateTime            @default(now())
+  updatedAt             DateTime            @updatedAt
+
+  mercadoLivreAccount   MercadoLivreAccount @relation(fields: [mercadoLivreAccountId], references: [id], onDelete: Cascade)
+
+  @@index([mercadoLivreAccountId])
+}
+
+// -----------------------------------------------------------------------------
+// 3. ANÚNCIOS (LISTINGS)
+// -----------------------------------------------------------------------------
+
+model Listing {
+  id                    String              @id @default(uuid())
+  organizationId        String
+  mercadoLivreAccountId String
+  mlItemId              String              // ID do anúncio no ML (ex: MLB1234567890)
+  title                 String
+  price                 Decimal
+  currencyId            String              @default("BRL")
+  availableQuantity     Int                 @default(0)
+  soldQuantity          Int                 @default(0)
+  status                String              // active, paused, closed, under_review
+  permalink             String?
+  thumbnail             String?
+  createdAt             DateTime            @default(now())
+  updatedAt             DateTime            @updatedAt
+
+  organization         Organization        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  mercadoLivreAccount  MercadoLivreAccount @relation(fields: [mercadoLivreAccountId], references: [id], onDelete: Cascade)
+
+  @@unique([mercadoLivreAccountId, mlItemId])
+  @@index([organizationId])
+  @@index([mercadoLivreAccountId])
+  @@index([status])
+  @@index([mlItemId])
+  @@index([createdAt])
+}
+
+// -----------------------------------------------------------------------------
+// 4. VENDAS E ENVIOS (ORDERS & SHIPMENTS)
+// -----------------------------------------------------------------------------
+
+model Order {
+  id                    String              @id @default(uuid())
+  organizationId        String
+  mercadoLivreAccountId String
+  mlOrderId             String              // ID da venda no ML (ex: 2000001234567890)
+  status                String              // confirmed, paid, shipped, delivered, cancelled
+  totalAmount           Decimal
+  buyerNickname         String
+  buyerId               String
+  dateCreated           DateTime            // Data da venda no Mercado Livre
+  dateClosed            DateTime?           // Data de encerramento no ML
+  createdAt             DateTime            @default(now())
+  updatedAt             DateTime            @updatedAt
+
+  organization         Organization        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  mercadoLivreAccount  MercadoLivreAccount @relation(fields: [mercadoLivreAccountId], references: [id], onDelete: Cascade)
+  orderItems           OrderItem[]
+  shipment             Shipment?
+  claim                Claim?
+
+  @@unique([mercadoLivreAccountId, mlOrderId])
+  @@index([organizationId])
+  @@index([mercadoLivreAccountId])
+  @@index([status])
+  @@index([mlOrderId])
+  @@index([dateCreated])
+}
+
+model OrderItem {
+  id        String   @id @default(uuid())
+  orderId   String
+  mlItemId  String   // ID do anúncio
+  title     String
+  quantity  Int      @default(1)
+  unitPrice Decimal
+  
+  order     Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@index([orderId])
+  @@index([mlItemId])
+}
+
+model Shipment {
+  id                    String              @id @default(uuid())
+  orderId               String              @unique
+  mercadoLivreAccountId String
+  mlShipmentId          String              // ID do envio no ML
+  status                String              // pending, ready_to_ship, shipped, delivered, cancelled
+  trackingNumber        String?
+  trackingMethod        String?
+  serviceId             String?
+  dateCreated           DateTime            // Data de criação no ML
+  dateFirstPrinted      DateTime?
+  dateShipped           DateTime?
+  dateDelivered         DateTime?
+  
+  order                 Order               @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@index([orderId])
+  @@index([mercadoLivreAccountId])
+  @@index([status])
+  @@index([dateCreated])
+}
+
+// -----------------------------------------------------------------------------
+// 5. PERGUNTAS E RECLAMAÇÕES (QUESTIONS & CLAIMS)
+// -----------------------------------------------------------------------------
+
+model Question {
+  id                    String              @id @default(uuid())
+  organizationId        String
+  mercadoLivreAccountId String
+  mlQuestionId          String              // ID da pergunta no ML
+  mlItemId              String              // ID do anúncio relacionado
+  text                  String
+  status                String              // unanswered, answered, deleted
+  answerText            String?
+  answerDate            DateTime?
+  buyerId               String
+  dateCreated           DateTime            // Data de criação no ML
+  
+  organization         Organization        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  mercadoLivreAccount  MercadoLivreAccount @relation(fields: [mercadoLivreAccountId], references: [id], onDelete: Cascade)
+
+  @@unique([mercadoLivreAccountId, mlQuestionId])
+  @@index([organizationId])
+  @@index([mercadoLivreAccountId])
+  @@index([status])
+  @@index([mlItemId])
+  @@index([dateCreated])
+}
+
+model Claim {
+  id                    String              @id @default(uuid())
+  organizationId        String
+  mercadoLivreAccountId String
+  orderId               String              @unique
+  mlClaimId             String              // ID da reclamação no ML
+  type                  String              // returns, warranty, etc.
+  stage                 String              // opened, handling, closed
+  status                String
+  reason                String
+  dateCreated           DateTime            // Data de abertura no ML
+  dateClosed            DateTime?           // Data de fechamento no ML
+  
+  organization         Organization        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  mercadoLivreAccount  MercadoLivreAccount @relation(fields: [mercadoLivreAccountId], references: [id], onDelete: Cascade)
+  order                Order               @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@unique([mercadoLivreAccountId, mlClaimId])
+  @@index([organizationId])
+  @@index([mercadoLivreAccountId])
+  @@index([status])
+  @@index([dateCreated])
+}
+
+// -----------------------------------------------------------------------------
+// 6. REPUTAÇÃO E PERFORMANCE (SELLER REPUTATION)
+// -----------------------------------------------------------------------------
+
+model SellerReputation {
+  id                       String              @id @default(uuid())
+  organizationId           String
+  mercadoLivreAccountId   String
+  levelId                  String?             // e.g. 5_green
+  powerSellerStatus        String?             // e.g. platinum, gold, silver
+  claimsRate               Decimal // Proporção (ex: 0.0125 para 1.25%)
+  delayedHandlingTimeRate  Decimal
+  cancellationsRate        Decimal
+  salesPeriod              String              // e.g. 60 days
+  salesCompleted           Int                 @default(0)
+  createdAt                DateTime            @default(now())
+
+  organization             Organization        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  mercadoLivreAccount      MercadoLivreAccount @relation(fields: [mercadoLivreAccountId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@index([mercadoLivreAccountId])
+  @@index([createdAt])
+}
+
+// -----------------------------------------------------------------------------
+// 7. INSTANTÂNEOS DE MÉTRICAS (METRIC SNAPSHOTS) E IA
+// -----------------------------------------------------------------------------
+
+// Armazena métricas consolidadas diárias para consultas de gráficos super velozes.
+// Se mercadoLivreAccountId for NULL, representa a visão CONSOLIDADA ("Todas as Contas") da organização!
+model MetricSnapshot {
+  id                    String               @id @default(uuid())
+  organizationId        String
+  mercadoLivreAccountId String?              // Nullable = Visão Consolidada
+  salesCount            Int                  @default(0)
+  revenue               Decimal              @default(0.00)
+  activeListings        Int                  @default(0)
+  conversionRate        Decimal              @default(0.0000)
+  avgTicket             Decimal              @default(0.00)
+  date                  DateTime             // Dia do snapshot
+  createdAt             DateTime             @default(now())
+
+  organization         Organization         @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  mercadoLivreAccount  MercadoLivreAccount? @relation(fields: [mercadoLivreAccountId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, mercadoLivreAccountId, date])
+  @@index([organizationId])
+  @@index([mercadoLivreAccountId])
+  @@index([date])
+}
+
+// Recomendações e análises inteligentes criadas pelo motor de IA do Datex
+model AIAnalysis {
+  id                    String               @id @default(uuid())
+  organizationId        String
+  mercadoLivreAccountId String?              // Nullable = Análise consolidada da Org
+  type                  String               // pricing, performance, stock, sentiment
+  title                 String
+  content               String // Corpo do insights em Markdown/HTML
+  score                 Decimal? // Indicador/Score da IA
+  actionableSteps       String // Ações práticas em formato JSON/texto
+  createdAt             DateTime             @default(now())
+
+  organization         Organization         @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  mercadoLivreAccount  MercadoLivreAccount? @relation(fields: [mercadoLivreAccountId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@index([mercadoLivreAccountId])
+  @@index([createdAt])
+}
+
+// -----------------------------------------------------------------------------
+// 10. EVENTOS DE WEBHOOK (WEBHOOK EVENTS)
+// -----------------------------------------------------------------------------
+
+// Armazena cada notificação recebida do Mercado Livre via webhook em tempo real.
+// O payload JSON bruto é sempre salvo mesmo que o processamento falhe.
+model WebhookEvent {
+  id                    String               @id @default(uuid())
+  provider              String               @default("mercadolivre") // identificador do provedor
+  topic                 String               // orders_v2, items, questions, shipments, claims, etc.
+  resource              String               // /orders/123, /items/MLB123, etc.
+  userIdMercadoLivre    String?              // user_id enviado pelo ML no payload
+  applicationId         String?              // application_id enviado pelo ML
+  attempts              Int                  @default(0) // número de tentativas de entrega do ML
+  payload               Json                 // payload bruto recebido
+  status                String               @default("received") // received, processing, processed, ignored, error
+  errorMessage          String?
+  processedAt           DateTime?
+  createdAt             DateTime             @default(now())
+  mercadoLivreAccountId String?              // vinculado à conta, se identificada pelo user_id
+
+  @@index([topic])
+  @@index([userIdMercadoLivre])
+  @@index([status])
+  @@index([createdAt])
+  @@index([mercadoLivreAccountId])
+}
+
+// -----------------------------------------------------------------------------
+// 11. TRILHA DE AUDITORIA (AUDIT LOG)
+// -----------------------------------------------------------------------------
+
+model AuditLog {
+  id                    String               @id @default(uuid())
+  organizationId        String
+  userId                String
+  mercadoLivreAccountId String?
+  action                String               // CONNECT_ACCOUNT, REVOKE_ACCOUNT, EXPORT_REPORT, etc.
+  details               String?
+  ipAddress             String?
+  createdAt             DateTime             @default(now())
+
+  organization         Organization         @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user                 User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+  mercadoLivreAccount  MercadoLivreAccount? @relation(fields: [mercadoLivreAccountId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@index([userId])
+  @@index([mercadoLivreAccountId])
+  @@index([createdAt])
+}
