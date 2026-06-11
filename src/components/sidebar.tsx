@@ -37,8 +37,6 @@ export function Sidebar({ className, isOpenMobile, onCloseMobile }: SidebarProps
     { name: "ANÚNCIOS", href: "/anuncios", icon: ShoppingBag },
     { name: "VENDAS", href: "/vendas", icon: TrendingUp },
     { name: "REPUTAÇÃO", href: "/reputacao", icon: Award },
-    { name: "PUBLICIDADE", href: "/publicidade", icon: Megaphone },
-    { name: "PROMOÇÕES", href: "/promocoes", icon: BadgePercent },
     { name: "INTELIGÊNCIA ARTIFICIAL", href: "/ia", icon: Cpu },
   ];
 
@@ -118,74 +116,6 @@ export function Sidebar({ className, isOpenMobile, onCloseMobile }: SidebarProps
             </Link>
           );
         })}
-
-        <div className="mt-3 border-t border-border/30 pt-3">
-          <div className="mb-1 px-3 text-[10px] font-bold uppercase tracking-widest text-muted-foreground/60">
-            Promoções
-          </div>
-
-          <button
-            onClick={() => setPromotionsOpen((value) => !value)}
-            className={cn(
-              "group relative flex w-full items-center justify-between rounded-xl px-4 py-3 text-[13px] font-medium tracking-wide transition-all duration-200",
-              isPromotionsActive
-                ? "bg-gradient-to-r from-primary to-indigo-600 font-semibold text-white shadow-md shadow-primary/25"
-                : "text-muted-foreground hover:bg-accent/60 hover:text-foreground"
-            )}
-          >
-            <span className="flex items-center gap-3">
-              {isPromotionsActive && <span className="absolute left-0 top-1/4 bottom-1/4 w-1 rounded-r-md bg-white" />}
-              <BadgePercent
-                className={cn(
-                  "h-4.5 w-4.5 shrink-0 transition-transform duration-300 group-hover:scale-110",
-                  isPromotionsActive ? "text-white" : "text-muted-foreground group-hover:text-foreground"
-                )}
-              />
-              <span>PROMOÇÕES</span>
-            </span>
-            <ChevronDown
-              className={cn(
-                "h-3.5 w-3.5 transition-transform duration-200",
-                promotionsOpen ? "rotate-180" : "",
-                isPromotionsActive ? "text-white/70" : "text-muted-foreground/50"
-              )}
-            />
-          </button>
-
-          {promotionsOpen && (
-            <div className="mt-1 space-y-0.5 border-l border-border/40 pl-3 ml-4">
-              {promotionsSubItems.map((item) => {
-                const isSubActive =
-                  item.href === "/promocoes"
-                    ? pathname === "/promocoes"
-                    : pathname.startsWith(item.href.split("#")[0]);
-                const Icon = item.icon;
-
-                return (
-                  <Link
-                    key={item.href}
-                    href={item.href}
-                    onClick={onCloseMobile}
-                    className={cn(
-                      "group flex items-center gap-2.5 rounded-lg px-3 py-2 text-[12px] font-medium transition-all duration-150",
-                      isSubActive
-                        ? "bg-primary/10 font-semibold text-primary"
-                        : "text-muted-foreground hover:bg-accent/50 hover:text-foreground"
-                    )}
-                  >
-                    <Icon
-                      className={cn(
-                        "h-3.5 w-3.5 shrink-0",
-                        isSubActive ? "text-primary" : "text-muted-foreground/70 group-hover:text-foreground"
-                      )}
-                    />
-                    <span>{item.name}</span>
-                  </Link>
-                );
-              })}
-            </div>
-          )}
-        </div>
 
         <div className="mt-3 border-t border-border/30 pt-3">
           <div className="mb-1 px-3 text-[10px] font-bold uppercase tracking-widest text-muted-foreground/60">
