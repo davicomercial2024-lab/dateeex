@@ -184,6 +184,66 @@ CREATE TABLE "SellerReputation" (
 );
 
 -- CreateTable
+CREATE TABLE "Promotion" (
+    "id" TEXT NOT NULL PRIMARY KEY,
+    "organizationId" TEXT NOT NULL,
+    "mlPromotionId" TEXT NOT NULL,
+    "name" TEXT NOT NULL,
+    "type" TEXT NOT NULL,
+    "status" TEXT NOT NULL,
+    "startDate" DATETIME NOT NULL,
+    "endDate" DATETIME NOT NULL,
+    CONSTRAINT "Promotion_organizationId_fkey" FOREIGN KEY ("organizationId") REFERENCES "Organization" ("id") ON DELETE CASCADE ON UPDATE CASCADE
+);
+
+-- CreateTable
+CREATE TABLE "PromotionOffer" (
+    "id" TEXT NOT NULL PRIMARY KEY,
+    "mercadoLivreAccountId" TEXT NOT NULL,
+    "promotionId" TEXT NOT NULL,
+    "listingId" TEXT NOT NULL,
+    "originalPrice" DECIMAL NOT NULL,
+    "promoPrice" DECIMAL NOT NULL,
+    "status" TEXT NOT NULL DEFAULT 'eligible',
+    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" DATETIME NOT NULL,
+    CONSTRAINT "PromotionOffer_promotionId_fkey" FOREIGN KEY ("promotionId") REFERENCES "Promotion" ("id") ON DELETE CASCADE ON UPDATE CASCADE,
+    CONSTRAINT "PromotionOffer_listingId_fkey" FOREIGN KEY ("listingId") REFERENCES "Listing" ("id") ON DELETE CASCADE ON UPDATE CASCADE,
+    CONSTRAINT "PromotionOffer_mercadoLivreAccountId_fkey" FOREIGN KEY ("mercadoLivreAccountId") REFERENCES "MercadoLivreAccount" ("id") ON DELETE CASCADE ON UPDATE CASCADE
+);
+
+-- CreateTable
+CREATE TABLE "AdvertisingCampaign" (
+    "id" TEXT NOT NULL PRIMARY KEY,
+    "organizationId" TEXT NOT NULL,
+    "mlCampaignId" TEXT NOT NULL,
+    "name" TEXT NOT NULL,
+    "status" TEXT NOT NULL,
+    "budget" DECIMAL NOT NULL,
+    "budgetType" TEXT NOT NULL DEFAULT 'daily',
+    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" DATETIME NOT NULL,
+    CONSTRAINT "AdvertisingCampaign_organizationId_fkey" FOREIGN KEY ("organizationId") REFERENCES "Organization" ("id") ON DELETE CASCADE ON UPDATE CASCADE
+);
+
+-- CreateTable
+CREATE TABLE "AdvertisingMetric" (
+    "id" TEXT NOT NULL PRIMARY KEY,
+    "mercadoLivreAccountId" TEXT NOT NULL,
+    "campaignId" TEXT NOT NULL,
+    "clicks" INTEGER NOT NULL DEFAULT 0,
+    "impressions" INTEGER NOT NULL DEFAULT 0,
+    "cost" DECIMAL NOT NULL,
+    "salesAmount" DECIMAL NOT NULL,
+    "salesQty" INTEGER NOT NULL DEFAULT 0,
+    "acos" DECIMAL NOT NULL,
+    "date" DATETIME NOT NULL,
+    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT "AdvertisingMetric_campaignId_fkey" FOREIGN KEY ("campaignId") REFERENCES "AdvertisingCampaign" ("id") ON DELETE CASCADE ON UPDATE CASCADE,
+    CONSTRAINT "AdvertisingMetric_mercadoLivreAccountId_fkey" FOREIGN KEY ("mercadoLivreAccountId") REFERENCES "MercadoLivreAccount" ("id") ON DELETE CASCADE ON UPDATE CASCADE
+);
+
+-- CreateTable
 CREATE TABLE "MetricSnapshot" (
     "id" TEXT NOT NULL PRIMARY KEY,
     "organizationId" TEXT NOT NULL,
@@ -380,6 +440,51 @@ CREATE INDEX "SellerReputation_mercadoLivreAccountId_idx" ON "SellerReputation"(
 
 -- CreateIndex
 CREATE INDEX "SellerReputation_createdAt_idx" ON "SellerReputation"("createdAt");
+
+-- CreateIndex
+CREATE INDEX "Promotion_organizationId_idx" ON "Promotion"("organizationId");
+
+-- CreateIndex
+CREATE INDEX "Promotion_status_idx" ON "Promotion"("status");
+
+-- CreateIndex
+CREATE INDEX "Promotion_startDate_endDate_idx" ON "Promotion"("startDate", "endDate");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "Promotion_organizationId_mlPromotionId_key" ON "Promotion"("organizationId", "mlPromotionId");
+
+-- CreateIndex
+CREATE INDEX "PromotionOffer_mercadoLivreAccountId_idx" ON "PromotionOffer"("mercadoLivreAccountId");
+
+-- CreateIndex
+CREATE INDEX "PromotionOffer_promotionId_idx" ON "PromotionOffer"("promotionId");
+
+-- CreateIndex
+CREATE INDEX "PromotionOffer_listingId_idx" ON "PromotionOffer"("listingId");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "PromotionOffer_promotionId_listingId_key" ON "PromotionOffer"("promotionId", "listingId");
+
+-- CreateIndex
+CREATE INDEX "AdvertisingCampaign_organizationId_idx" ON "AdvertisingCampaign"("organizationId");
+
+-- CreateIndex
+CREATE INDEX "AdvertisingCampaign_status_idx" ON "AdvertisingCampaign"("status");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "AdvertisingCampaign_organizationId_mlCampaignId_key" ON "AdvertisingCampaign"("organizationId", "mlCampaignId");
+
+-- CreateIndex
+CREATE INDEX "AdvertisingMetric_mercadoLivreAccountId_idx" ON "AdvertisingMetric"("mercadoLivreAccountId");
+
+-- CreateIndex
+CREATE INDEX "AdvertisingMetric_campaignId_idx" ON "AdvertisingMetric"("campaignId");
+
+-- CreateIndex
+CREATE INDEX "AdvertisingMetric_date_idx" ON "AdvertisingMetric"("date");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "AdvertisingMetric_campaignId_date_key" ON "AdvertisingMetric"("campaignId", "date");
 
 -- CreateIndex
 CREATE INDEX "MetricSnapshot_organizationId_idx" ON "MetricSnapshot"("organizationId");

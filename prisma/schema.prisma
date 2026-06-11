@@ -36,6 +36,8 @@ model Organization {
   questions            Question[]
   claims               Claim[]
   reputations          SellerReputation[]
+  promotions           Promotion[]
+  advertisingCampaigns AdvertisingCampaign[]
   metricSnapshots      MetricSnapshot[]
   aiAnalyses           AIAnalysis[]
   auditLogs            AuditLog[]
@@ -89,6 +91,8 @@ model MercadoLivreAccount {
   questions          Question[]
   claims             Claim[]
   reputations        SellerReputation[]
+  promotionOffers    PromotionOffer[]
+  advertisingMetrics AdvertisingMetric[]
   metricSnapshots    MetricSnapshot[]
   aiAnalyses         AIAnalysis[]
   auditLogs          AuditLog[]
@@ -138,6 +142,7 @@ model Listing {
 
   organization         Organization        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   mercadoLivreAccount  MercadoLivreAccount @relation(fields: [mercadoLivreAccountId], references: [id], onDelete: Cascade)
+  promotionOffers      PromotionOffer[]
 
   @@unique([mercadoLivreAccountId, mlItemId])
   @@index([organizationId])
@@ -293,7 +298,96 @@ model SellerReputation {
 }
 
 // -----------------------------------------------------------------------------
-// 7. INSTANTÂNEOS DE MÉTRICAS (METRIC SNAPSHOTS) E IA
+// 7. PROMOÇÕES DO MERCADO LIVRE
+// -----------------------------------------------------------------------------
+
+model Promotion {
+  id             String           @id @default(uuid())
+  organizationId String
+  mlPromotionId  String           // ID da promoção no ML
+  name           String
+  type           String           // deal, lightning, deal_of_the_day
+  status         String           // active, pending, finished
+  startDate      DateTime
+  endDate        DateTime
+  
+  organization   Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  promotionOffers PromotionOffer[]
+
+  @@unique([organizationId, mlPromotionId])
+  @@index([organizationId])
+  @@index([status])
+  @@index([startDate, endDate])
+}
+
+model PromotionOffer {
+  id                    String              @id @default(uuid())
+  mercadoLivreAccountId String
+  promotionId           String
+  listingId             String
+  originalPrice         Decimal
+  promoPrice            Decimal
+  status                String              @default("eligible") // eligible, active, inactive
+  createdAt             DateTime            @default(now())
+  updatedAt             DateTime            @updatedAt
+
+  promotion             Promotion           @relation(fields: [promotionId], references: [id], onDelete: Cascade)
+  listing               Listing             @relation(fields: [listingId], references: [id], onDelete: Cascade)
+  mercadoLivreAccount   MercadoLivreAccount @relation(fields: [mercadoLivreAccountId], references: [id], onDelete: Cascade)
+
+  @@unique([promotionId, listingId])
+  @@index([mercadoLivreAccountId])
+  @@index([promotionId])
+  @@index([listingId])
+}
+
+// -----------------------------------------------------------------------------
+// 8. CAMPANHAS DE PUBLICIDADE (ADS)
+// -----------------------------------------------------------------------------
+
+model AdvertisingCampaign {
+  id             String              @id @default(uuid())
+  organizationId String
+  mlCampaignId   String              // ID da campanha de Ads no ML
+  name           String
+  status         String              // active, paused, ended
+  budget         Decimal
+  budgetType     String              @default("daily")
+  createdAt      DateTime            @default(now())
+  updatedAt      DateTime            @updatedAt
+
+  organization   Organization        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  metrics        AdvertisingMetric[]
+
+  @@unique([organizationId, mlCampaignId])
+  @@index([organizationId])
+  @@index([status])
+}
+
+model AdvertisingMetric {
+  id                    String              @id @default(uuid())
+  mercadoLivreAccountId String
+  campaignId            String
+  clicks                Int                 @default(0)
+  impressions           Int                 @default(0)
+  cost                  Decimal
+  salesAmount           Decimal
+  salesQty              Int                 @default(0)
+  acos                  Decimal // ex: 0.1250 para 12.5%
+  date                  DateTime            // Data da métrica
+  createdAt             DateTime            @default(now())
+
+  campaign              AdvertisingCampaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  mercadoLivreAccount   MercadoLivreAccount @relation(fields: [mercadoLivreAccountId], references: [id], onDelete: Cascade)
+
+  @@unique([campaignId, date])
+  @@index([mercadoLivreAccountId])
+  @@index([campaignId])
+  @@index([date])
+}
+
+// -----------------------------------------------------------------------------
+// 9. INSTANTÂNEOS DE MÉTRICAS (METRIC SNAPSHOTS) E IA
 // -----------------------------------------------------------------------------
 
 // Armazena métricas consolidadas diárias para consultas de gráficos super velozes.
