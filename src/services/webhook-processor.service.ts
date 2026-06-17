@@ -305,10 +305,14 @@ export class WebhookProcessorService {
     accountId: string,
     organizationId: string
   ): Promise<void> {
-    const questions = await MercadoLivreApiService.fetchQuestions(
+    const response = await MercadoLivreApiService.fetchQuestionsChunk(
       meliUserId,
-      accessToken
+      accessToken,
+      0,
+      50
     );
+
+    const questions = response.questions || [];
 
     for (const q of questions) {
       const questionData = {
