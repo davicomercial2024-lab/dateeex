@@ -1,26 +1,18 @@
-import PocketBase from 'pocketbase';
+import { pbAdmin } from "./src/lib/pb";
 
 async function main() {
-  const pb = new PocketBase(process.env.NEXT_PUBLIC_POCKETBASE_URL);
-  try {
-    await pb.admins.authWithPassword(process.env.PB_ADMIN_EMAIL as string, process.env.PB_ADMIN_PASS as string);
-    console.log("Auth success");
-  } catch (e: any) {
-    console.error("Auth Error:", e?.response || e);
-    return;
-  }
+  await pbAdmin.admins.authWithPassword(
+    process.env.PB_ADMIN_EMAIL as string,
+    process.env.PB_ADMIN_PASS as string
+  );
 
-  try {
-    const accounts = await pb.collection("mercado_livre_accounts").getFullList();
-    console.log("Total accounts:", accounts.length);
-    for (const acc of accounts) {
-      console.log(`- ${acc.id} | ${acc.nickname}`);
-      const listings = await pb.collection("listings").getList(1, 1, { filter: `account="${acc.id}"` });
-      console.log(`  - Listings: ${listings.totalItems}`);
+  const collection = await pbAdmin.collections.getOne("listings");
+  const fields = collection.fields || collection.schema;
+  for (const field of fields) {
+    if (field.type === "relation") {
+      console.log(`Relation field: ${field.name}`);
     }
-  } catch (e: any) {
-    console.error("Fetch Error:", e?.response || e);
   }
 }
 
-main();
+main().catch(console.error);

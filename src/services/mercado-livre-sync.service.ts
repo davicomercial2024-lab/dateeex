@@ -53,28 +53,32 @@ export class MercadoLivreSyncService {
     const { items, total } = await MercadoLivreApiService.fetchListingsChunk(account.meliUserId, token.accessToken, offset, limit);
     
     await Promise.all(items.map(async (item) => {
-      const listingData = {
-        organization: organizationId,
-        account: accountId,
-        mlItemId: item.id,
-        title: item.title || "",
-        price: item.price || 0,
-        availableQuantity: item.available_quantity || 0,
-        soldQuantity: item.sold_quantity || 0,
-        condition: (item as any).condition || "",
-        permalink: item.permalink || "",
-        thumbnail: item.thumbnail || "",
-        status: item.status || "active",
-        catalogProductId: (item as any).catalog_product_id || "",
-        health: (item as any).health || 0,
-        visits: 0
-      };
-
       try {
-        const existing = await pbAdmin.collection("listings").getFirstListItem(`account="${accountId}" && mlItemId="${item.id}"`);
-        await pbAdmin.collection("listings").update(existing.id, listingData);
-      } catch (e) {
-        await pbAdmin.collection("listings").create(listingData);
+        const listingData = {
+          organization: organizationId,
+          account: accountId,
+          mlItemId: item.id,
+          title: item.title || "",
+          price: item.price || 0,
+          availableQuantity: item.available_quantity || 0,
+          soldQuantity: item.sold_quantity || 0,
+          condition: (item as any).condition || "",
+          permalink: item.permalink || "",
+          thumbnail: item.thumbnail || "",
+          status: item.status || "active",
+          catalogProductId: (item as any).catalog_product_id || "",
+          health: (item as any).health || 0,
+          visits: 0
+        };
+
+        try {
+          const existing = await pbAdmin.collection("listings").getFirstListItem(`account="${accountId}" && mlItemId="${item.id}"`);
+          await pbAdmin.collection("listings").update(existing.id, listingData);
+        } catch (e) {
+          await pbAdmin.collection("listings").create(listingData);
+        }
+      } catch (err) {
+        console.error(`Erro ao processar listing ${item.id}:`, err);
       }
     }));
 
@@ -88,23 +92,27 @@ export class MercadoLivreSyncService {
     const { orders, total } = await MercadoLivreApiService.fetchOrdersChunk(account.meliUserId, token.accessToken, offset, limit);
     
     await Promise.all(orders.map(async (order) => {
-      const orderData = {
-        organization: organizationId,
-        account: accountId,
-        mlOrderId: order.id.toString(),
-        status: order.status,
-        dateCreated: new Date(order.date_created).toISOString(),
-        totalAmount: order.total_amount,
-        currencyId: (order as any).currency_id || "BRL",
-        buyerNickname: order.buyer?.nickname || "Desconhecido",
-        itemCount: order.order_items ? order.order_items.length : 0
-      };
-
       try {
-        const existing = await pbAdmin.collection("orders").getFirstListItem(`account="${accountId}" && mlOrderId="${order.id.toString()}"`);
-        await pbAdmin.collection("orders").update(existing.id, orderData);
-      } catch (e) {
-        await pbAdmin.collection("orders").create(orderData);
+        const orderData = {
+          organization: organizationId,
+          account: accountId,
+          mlOrderId: order.id.toString(),
+          status: order.status,
+          dateCreated: new Date(order.date_created).toISOString(),
+          totalAmount: order.total_amount,
+          currencyId: (order as any).currency_id || "BRL",
+          buyerNickname: order.buyer?.nickname || "Desconhecido",
+          itemCount: order.order_items ? order.order_items.length : 0
+        };
+
+        try {
+          const existing = await pbAdmin.collection("orders").getFirstListItem(`account="${accountId}" && mlOrderId="${order.id.toString()}"`);
+          await pbAdmin.collection("orders").update(existing.id, orderData);
+        } catch (e) {
+          await pbAdmin.collection("orders").create(orderData);
+        }
+      } catch (err) {
+        console.error(`Erro ao processar order ${order.id}:`, err);
       }
     }));
 
@@ -118,22 +126,26 @@ export class MercadoLivreSyncService {
     const { questions, total } = await MercadoLivreApiService.fetchQuestionsChunk(account.meliUserId, token.accessToken, offset, limit);
     
     await Promise.all(questions.map(async (question) => {
-      const questionData = {
-        organization: organizationId,
-        account: accountId,
-        mlQuestionId: question.id.toString(),
-        itemId: question.item_id,
-        status: question.status,
-        text: question.text,
-        answer: question.answer ? question.answer.text : "",
-        dateCreated: new Date(question.date_created).toISOString()
-      };
-
       try {
-        const existing = await pbAdmin.collection("questions").getFirstListItem(`account="${accountId}" && mlQuestionId="${question.id.toString()}"`);
-        await pbAdmin.collection("questions").update(existing.id, questionData);
-      } catch (e) {
-        await pbAdmin.collection("questions").create(questionData);
+        const questionData = {
+          organization: organizationId,
+          account: accountId,
+          mlQuestionId: question.id.toString(),
+          itemId: question.item_id,
+          status: question.status,
+          text: question.text,
+          answer: question.answer ? question.answer.text : "",
+          dateCreated: new Date(question.date_created).toISOString()
+        };
+
+        try {
+          const existing = await pbAdmin.collection("questions").getFirstListItem(`account="${accountId}" && mlQuestionId="${question.id.toString()}"`);
+          await pbAdmin.collection("questions").update(existing.id, questionData);
+        } catch (e) {
+          await pbAdmin.collection("questions").create(questionData);
+        }
+      } catch (err) {
+        console.error(`Erro ao processar question ${question.id}:`, err);
       }
     }));
 
