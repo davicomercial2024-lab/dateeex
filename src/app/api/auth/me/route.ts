@@ -23,7 +23,7 @@ export async function GET() {
     }
 
     // Autentica admin para queries
-    await pbAdmin.admins.authWithPassword(process.env.PB_ADMIN_EMAIL || 'bbbaterias@bbdi.com.br', process.env.PB_ADMIN_PASS || 'diev1pn4753ikpf');
+    await pbAdmin.admins.authWithPassword(process.env.PB_ADMIN_EMAIL as string, process.env.PB_ADMIN_PASS as string);
 
     // Busca usuário no PocketBase
     let user;

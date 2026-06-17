@@ -62,7 +62,7 @@ export async function POST(request: Request) {
   let webhookEventId: string | null = null;
 
   try {
-    await pbAdmin.admins.authWithPassword(process.env.PB_ADMIN_EMAIL || 'bbbaterias@bbdi.com.br', process.env.PB_ADMIN_PASS || 'diev1pn4753ikpf');
+    await pbAdmin.admins.authWithPassword(process.env.PB_ADMIN_EMAIL as string, process.env.PB_ADMIN_PASS as string);
     const saved = await pbAdmin.collection("webhook_events").create({
       provider: "mercadolivre",
       topic,

@@ -33,7 +33,7 @@ export async function POST(request: Request) {
     const user = authData.record;
 
     // Autentica admin para buscar relacionamentos seguros (organization_members)
-    await pbAdmin.admins.authWithPassword(process.env.PB_ADMIN_EMAIL || 'bbbaterias@bbdi.com.br', process.env.PB_ADMIN_PASS || 'diev1pn4753ikpf');
+    await pbAdmin.admins.authWithPassword(process.env.PB_ADMIN_EMAIL as string, process.env.PB_ADMIN_PASS as string);
 
     // Obtém a organização ativa do usuário
     let activeMembership;
