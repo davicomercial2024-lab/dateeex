@@ -159,15 +159,13 @@ function SyncModal({
 
     const runSync = async () => {
       try {
-        const orgId = account.organization;
-
         // Step 1: Details
         if (isCancelled) return;
         setStep("details");
         setProgress(5);
         await fetch(`/api/mercado-livre/accounts/${account.id}/sync-chunk`, {
           method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ step: "details", orgId }),
+          body: JSON.stringify({ step: "details" }),
         });
         setProgress(10);
 
@@ -178,7 +176,7 @@ function SyncModal({
         while (hasMore && !isCancelled) {
           const res = await fetch(`/api/mercado-livre/accounts/${account.id}/sync-chunk`, {
             method: "POST", headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ step: "listings", orgId, offset, limit: 50 }),
+            body: JSON.stringify({ step: "listings", offset, limit: 50 }),
           });
           const data = await res.json();
           if (!data.success) throw new Error(data.error);
@@ -197,7 +195,7 @@ function SyncModal({
         while (hasMore && !isCancelled) {
           const res = await fetch(`/api/mercado-livre/accounts/${account.id}/sync-chunk`, {
             method: "POST", headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ step: "orders", orgId, offset, limit: 50 }),
+            body: JSON.stringify({ step: "orders", offset, limit: 50 }),
           });
           const data = await res.json();
           if (!data.success) throw new Error(data.error);
@@ -216,7 +214,7 @@ function SyncModal({
         while (hasMore && !isCancelled) {
           const res = await fetch(`/api/mercado-livre/accounts/${account.id}/sync-chunk`, {
             method: "POST", headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ step: "questions", orgId, offset, limit: 50 }),
+            body: JSON.stringify({ step: "questions", offset, limit: 50 }),
           });
           const data = await res.json();
           if (!data.success) throw new Error(data.error);

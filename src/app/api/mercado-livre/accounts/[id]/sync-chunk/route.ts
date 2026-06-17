@@ -2,21 +2,32 @@ import { NextResponse } from "next/server";
 import { MercadoLivreSyncService } from "@/services/mercado-livre-sync.service";
 import { pbAdmin } from "@/lib/pb";
 
+import { verifyToken } from "@/lib/auth";
+import { cookies } from "next/headers";
+
 export async function POST(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const cookieStore = await cookies();
+    const session = cookieStore.get("datex_session");
+    if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
+    const payload = await verifyToken(session.value);
+    if (!payload) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    const orgId = payload.orgId;
+
     const { id: accountId } = await params;
     if (!accountId) {
       return NextResponse.json({ error: "Missing account ID" }, { status: 400 });
     }
 
     const body = await request.json();
-    const { step, offset = 0, limit = 50, orgId } = body;
+    const { step, offset = 0, limit = 50 } = body;
 
-    if (!step || !orgId) {
-      return NextResponse.json({ error: "Missing step or orgId" }, { status: 400 });
+    if (!step) {
+      return NextResponse.json({ error: "Missing step" }, { status: 400 });
     }
 
     let result = { hasMore: false, total: 0 };
