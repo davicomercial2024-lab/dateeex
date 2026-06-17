@@ -38,7 +38,13 @@ export async function GET(request: Request) {
       sort: "-isDefault,created",
     });
 
-    const accountsWithCounts = accounts.map((acc) => {
+    const accountsWithCounts = await Promise.all(accounts.map(async (acc) => {
+      const [listings, orders, questions] = await Promise.all([
+        pbAdmin.collection("listings").getList(1, 1, { filter: `account="${acc.id}"` }).catch(() => ({ totalItems: 0 })),
+        pbAdmin.collection("orders").getList(1, 1, { filter: `account="${acc.id}"` }).catch(() => ({ totalItems: 0 })),
+        pbAdmin.collection("questions").getList(1, 1, { filter: `account="${acc.id}"` }).catch(() => ({ totalItems: 0 })),
+      ]);
+
       return {
         ...acc,
         displayName: acc.nicknameCustom || acc.nickname,
@@ -46,9 +52,13 @@ export async function GET(request: Request) {
         connectedAt: acc.created,
         disconnectedAt: acc.disconnectedAt || null,
         createdAt: acc.created,
-        counts: { listings: 0, orders: 0, questions: 0 },
+        counts: {
+          listings: listings.totalItems,
+          orders: orders.totalItems,
+          questions: questions.totalItems,
+        },
       };
-    });
+    }));
 
     return NextResponse.json({ success: true, accounts: accountsWithCounts });
   } catch (err: any) {

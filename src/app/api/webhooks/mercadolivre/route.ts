@@ -82,16 +82,14 @@ export async function POST(request: Request) {
   const savedWebhookEventId = webhookEventId;
 
   if (savedWebhookEventId) {
-    after(async () => {
-      try {
-        await WebhookProcessorService.process(savedWebhookEventId);
-      } catch (err: any) {
-        console.error(
-          `[Webhook ML] Erro no processamento assíncrono do evento ${savedWebhookEventId}:`,
-          err?.message || err
-        );
-      }
-    });
+    try {
+      await WebhookProcessorService.process(savedWebhookEventId);
+    } catch (err: any) {
+      console.error(
+        `[Webhook ML] Erro no processamento assíncrono do evento ${savedWebhookEventId}:`,
+        err?.message || err
+      );
+    }
   }
 
   return NextResponse.json({ ok: true }, { status: 200 });

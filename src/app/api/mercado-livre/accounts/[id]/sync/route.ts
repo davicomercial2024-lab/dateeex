@@ -44,33 +44,31 @@ export async function POST(_request: Request, { params }: RouteParams) {
       lastSyncStatus: "SYNCING", lastSyncProgress: 0, lastSyncError: null
     });
 
-    after(async () => {
-      try {
-        const { MercadoLivreSyncService } = await import("@/services/mercado-livre-sync.service");
-        const report = await MercadoLivreSyncService.syncAccount(
-          id,
-          payload.orgId,
-          payload.userId,
-          undefined,
-          async (progress) => {
-            await pbAdmin.collection("mercado_livre_accounts").update(id, {
-              lastSyncProgress: progress
-            });
-          }
-        );
-        await pbAdmin.collection("mercado_livre_accounts").update(id, {
-          lastSyncAt: new Date().toISOString(),
-          lastSyncStatus: report.errors.length === 0 ? "SUCCESS" : "PARTIAL",
-          lastSyncProgress: 100,
-          lastSyncError: report.errors.length > 0 ? report.errors.join("; ") : null,
-        });
-      } catch (err: unknown) {
-        const msg = err instanceof Error ? err.message : String(err);
-        await pbAdmin.collection("mercado_livre_accounts").update(id, {
-          lastSyncStatus: "FAILED", lastSyncError: msg, lastSyncAt: new Date().toISOString(), lastSyncProgress: 100
-        });
-      }
-    });
+    try {
+      const { MercadoLivreSyncService } = await import("@/services/mercado-livre-sync.service");
+      const report = await MercadoLivreSyncService.syncAccount(
+        id,
+        payload.orgId,
+        payload.userId,
+        undefined,
+        async (progress) => {
+          await pbAdmin.collection("mercado_livre_accounts").update(id, {
+            lastSyncProgress: progress
+          });
+        }
+      );
+      await pbAdmin.collection("mercado_livre_accounts").update(id, {
+        lastSyncAt: new Date().toISOString(),
+        lastSyncStatus: report.errors.length === 0 ? "SUCCESS" : "PARTIAL",
+        lastSyncProgress: 100,
+        lastSyncError: report.errors.length > 0 ? report.errors.join("; ") : null,
+      });
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      await pbAdmin.collection("mercado_livre_accounts").update(id, {
+        lastSyncStatus: "FAILED", lastSyncError: msg, lastSyncAt: new Date().toISOString(), lastSyncProgress: 100
+      });
+    }
 
     return NextResponse.json(
       { success: true, message: "Sincronização iniciada. Você pode continuar usando o sistema." },
