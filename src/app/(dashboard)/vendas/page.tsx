@@ -19,7 +19,7 @@ interface Order {
   totalAmount: number | string;
   buyerNickname: string;
   dateCreated: string;
-  orderItems: OrderItem[];
+  itemCount: number;
   mercadoLivreAccount?: { nickname: string };
 }
 
@@ -221,7 +221,7 @@ export default function VendasPage() {
                   <span className="text-[10px] font-mono text-muted-foreground">{order.mlOrderId}</span>
                 </div>
                 <div className="col-span-2 text-center text-xs font-semibold text-foreground">
-                  {order.orderItems.length}
+                  {order.itemCount} ite{order.itemCount === 1 ? 'm' : 'ns'}
                 </div>
                 <div className="col-span-2 text-center text-xs font-bold text-foreground">
                   {formatBRL(order.totalAmount)}
