@@ -171,16 +171,18 @@ function SyncModal({
 
         // Step 2: Listings
         let offset = 0;
+        let scrollId: string | undefined = undefined;
         let hasMore = true;
         setStep("listings");
         while (hasMore && !isCancelled) {
           const res = await fetch(`/api/mercado-livre/accounts/${account.id}/sync-chunk`, {
             method: "POST", headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ step: "listings", offset, limit: 50 }),
+            body: JSON.stringify({ step: "listings", scrollId, offset, limit: 50 }),
           });
           const data = await res.json();
           if (!data.success) throw new Error(data.error);
           hasMore = data.hasMore;
+          scrollId = data.scrollId;
           offset += 50;
           
           setCounters(c => ({ ...c, listings: Math.min(offset, data.total) }));

@@ -389,29 +389,34 @@ export class MercadoLivreApiService {
   /**
    * Busca anúncios (Listings) em lotes (Chunks)
    */
-  static async fetchListingsChunk(meliUserId: string, accessToken: string, offset: number = 0, limit: number = 50): Promise<{ items: MeliItemPayload[], total: number }> {
+  static async fetchListingsChunk(meliUserId: string, accessToken: string, scrollId?: string, limit: number = 50): Promise<{ items: MeliItemPayload[], scrollId?: string, total: number }> {
     interface SearchResult {
       results: string[];
       paging: { total: number };
+      scroll_id?: string;
     }
     
     const allIds: string[] = [];
     let total = 0;
+    let nextScrollId = scrollId;
     
     try {
-      const searchRes = await this.request<SearchResult>(
-        `/users/${meliUserId}/items/search?limit=${limit}&offset=${offset}`,
-        accessToken
-      );
+      let url = `/users/${meliUserId}/items/search?search_type=scan&limit=${limit}`;
+      if (scrollId) {
+        url += `&scroll_id=${scrollId}`;
+      }
+      
+      const searchRes = await this.request<SearchResult>(url, accessToken);
       if (searchRes.results && searchRes.results.length > 0) {
         allIds.push(...searchRes.results);
       }
       total = searchRes.paging?.total || 0;
+      nextScrollId = searchRes.scroll_id || undefined;
     } catch (e) {
       console.warn(`Erro na busca de items (chunk):`, e);
     }
 
-    if (allIds.length === 0) return { items: [], total };
+    if (allIds.length === 0) return { items: [], scrollId: nextScrollId, total };
 
     // Faz o multiget em lotes de 20
     const batches: string[][] = [];
@@ -440,7 +445,7 @@ export class MercadoLivreApiService {
       });
     }
 
-    return { items, total };
+    return { items, scrollId: nextScrollId, total };
   }
 
   /**

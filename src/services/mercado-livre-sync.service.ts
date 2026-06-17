@@ -57,29 +57,27 @@ export class MercadoLivreSyncService {
     }
   }
 
-  static async syncListingsChunk(accountId: string, organizationId: string, offset: number, limit: number): Promise<{ hasMore: boolean, total: number }> {
+  static async syncListingsChunk(accountId: string, organizationId: string, scrollId: string | undefined, limit: number): Promise<{ hasMore: boolean, scrollId?: string, total: number }> {
     const { account, token } = await this.getAccountAndToken(accountId, organizationId);
     if (token.accessToken.includes("mock")) return { hasMore: false, total: 0 };
 
-    const { items, total } = await MercadoLivreApiService.fetchListingsChunk(account.meliUserId, token.accessToken, offset, limit);
+    const { items, scrollId: nextScrollId, total } = await MercadoLivreApiService.fetchListingsChunk(account.meliUserId, token.accessToken, scrollId, limit);
     
-    await Promise.all(items.map(async (item) => {
+    for (const item of items) {
       try {
         const listingData = {
           organization: organizationId,
           account: accountId,
           mlItemId: item.id,
-          title: item.title || "",
-          price: item.price || 0,
-          availableQuantity: item.available_quantity || 0,
-          soldQuantity: item.sold_quantity || 0,
-          condition: (item as any).condition || "",
-          permalink: item.permalink || "",
+          title: item.title,
+          price: item.price,
+          currencyId: item.currency_id || "BRL",
+          availableQuantity: item.available_quantity,
+          soldQuantity: item.sold_quantity,
+          status: item.status,
+          permalink: item.permalink,
           thumbnail: item.thumbnail || "",
-          status: item.status || "active",
-          catalogProductId: (item as any).catalog_product_id || "",
-          health: (item as any).health || 0,
-          visits: 0
+          catalogProductId: (item as any).catalog_product_id || ""
         };
 
         try {
@@ -91,9 +89,9 @@ export class MercadoLivreSyncService {
       } catch (err) {
         console.error(`Erro ao processar listing ${item.id}:`, err);
       }
-    }));
+    }
 
-    return { hasMore: offset + items.length < total, total };
+    return { hasMore: nextScrollId ? true : false, scrollId: nextScrollId, total };
   }
 
   static async syncOrdersChunk(accountId: string, organizationId: string, offset: number, limit: number): Promise<{ hasMore: boolean, total: number }> {
@@ -102,7 +100,7 @@ export class MercadoLivreSyncService {
 
     const { orders, total } = await MercadoLivreApiService.fetchOrdersChunk(account.meliUserId, token.accessToken, offset, limit);
     
-    await Promise.all(orders.map(async (order) => {
+    for (const order of orders) {
       try {
         const orderData = {
           organization: organizationId,
@@ -125,7 +123,7 @@ export class MercadoLivreSyncService {
       } catch (err) {
         console.error(`Erro ao processar order ${order.id}:`, err);
       }
-    }));
+    }
 
     return { hasMore: offset + orders.length < total, total };
   }
@@ -136,7 +134,7 @@ export class MercadoLivreSyncService {
 
     const { questions, total } = await MercadoLivreApiService.fetchQuestionsChunk(account.meliUserId, token.accessToken, offset, limit);
     
-    await Promise.all(questions.map(async (question) => {
+    for (const question of questions) {
       try {
         const questionData = {
           organization: organizationId,
@@ -158,7 +156,7 @@ export class MercadoLivreSyncService {
       } catch (err) {
         console.error(`Erro ao processar question ${question.id}:`, err);
       }
-    }));
+    }
 
     return { hasMore: offset + questions.length < total, total };
   }
