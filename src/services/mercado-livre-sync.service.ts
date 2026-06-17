@@ -1,4 +1,4 @@
-import { prisma } from "@/lib/prisma";
+import { pbAdmin } from "@/lib/pb";
 import { MercadoLivreApiService } from "./mercado-livre-api.service";
 
 type SyncProgressCallback = (progress: number) => Promise<void> | void;
@@ -45,21 +45,22 @@ export class MercadoLivreSyncService {
     };
 
     // 1. Carrega a conta e o token do banco
-    const account = await prisma.mercadoLivreAccount.findFirst({
-      where: { id: accountId, organizationId, isActive: true },
-      include: { token: true },
-    });
-
-    if (!account) {
+    let account;
+    try {
+      account = await pbAdmin.collection("mercado_livre_accounts").getFirstListItem(`id="${accountId}" && organization="${organizationId}" && isActive=true`);
+    } catch (e) {
       const err = "Conta do Mercado Livre não encontrada ou acesso negado.";
       report.errors.push(err);
       await this.logAudit(organizationId, userId, accountId, "SYNC_FAILED", err, ipAddress);
       return report;
     }
 
-    report.nickname = account.nickname;
+    report.nickname = account.nickname || "";
 
-    if (!account.token) {
+    let token;
+    try {
+      token = await pbAdmin.collection("oauth_tokens").getFirstListItem(`account="${account.id}"`);
+    } catch (e) {
       const err = `Nenhum token de autorização encontrado para a conta ${account.nickname}.`;
       report.errors.push(err);
       await this.logAudit(organizationId, userId, accountId, "SYNC_FAILED", err, ipAddress);
@@ -68,9 +69,9 @@ export class MercadoLivreSyncService {
 
     await this.reportProgress(onProgress, 5);
 
-    let accessToken = account.token.accessToken;
-    let refreshToken = account.token.refreshToken;
-    let expiresAt = account.token.expiresAt;
+    let accessToken = token.accessToken;
+    let refreshToken = token.refreshToken;
+    let expiresAt = new Date(token.expiresAt);
 
     // 2. Renova o token se expirado ou prestes a expirar (menos de 5 minutos de validade)
     const now = new Date();
@@ -78,13 +79,9 @@ export class MercadoLivreSyncService {
 
     if (isCloseToExpire || account.status === "EXPIRED") {
       try {
-        // Se for um token simulado (mock), apenas avançamos o tempo de expiração para simular sucesso
         if (accessToken.includes("mock-token") || refreshToken.includes("mock-token")) {
           const newExpiresAt = new Date(Date.now() + 6 * 60 * 60 * 1000); // +6 horas
-          await prisma.oAuthToken.update({
-            where: { mercadoLivreAccountId: accountId },
-            data: { expiresAt: newExpiresAt },
-          });
+          await pbAdmin.collection("oauth_tokens").update(token.id, { expiresAt: newExpiresAt.toISOString() });
           expiresAt = newExpiresAt;
           await this.logAudit(
             organizationId,
@@ -100,23 +97,17 @@ export class MercadoLivreSyncService {
           const refreshRes = await MercadoLivreApiService.refreshToken(refreshToken);
           const newExpiresAt = new Date(Date.now() + refreshRes.expires_in * 1000);
 
-          await prisma.oAuthToken.update({
-            where: { mercadoLivreAccountId: accountId },
-            data: {
-              accessToken: refreshRes.access_token,
-              refreshToken: refreshRes.refresh_token,
-              expiresAt: newExpiresAt,
-            },
+          await pbAdmin.collection("oauth_tokens").update(token.id, {
+            accessToken: refreshRes.access_token,
+            refreshToken: refreshRes.refresh_token,
+            expiresAt: newExpiresAt.toISOString(),
           });
 
           accessToken = refreshRes.access_token;
           refreshToken = refreshRes.refresh_token;
           expiresAt = newExpiresAt;
 
-          await prisma.mercadoLivreAccount.update({
-            where: { id: accountId },
-            data: { status: "CONNECTED" },
-          });
+          await pbAdmin.collection("mercado_livre_accounts").update(account.id, { status: "CONNECTED" });
 
           await this.logAudit(
             organizationId,
@@ -132,22 +123,16 @@ export class MercadoLivreSyncService {
         const errMsg = `Falha crítica ao renovar token OAuth: ${err.message || err}`;
         report.errors.push(errMsg);
         
-        await prisma.mercadoLivreAccount.update({
-          where: { id: accountId },
-          data: { status: "EXPIRED" },
-        });
+        await pbAdmin.collection("mercado_livre_accounts").update(account.id, { status: "EXPIRED" });
 
         await this.logAudit(organizationId, userId, accountId, "SYNC_FAILED", errMsg, ipAddress);
         return report;
       }
     }
 
-    // Se for um token puramente simulado e não quisermos bater na API real (evitando 401 instantâneos),
-    // a sincronização apenas zera ou valida que a API oficial não possui dados reais.
-    // Desta forma, o comportamento atende perfeitamente à regra de "se a API não retornar dados, exibir estado vazio".
     const isMock = accessToken.includes("mock-token");
 
-    // 3. Executa as sincronias de entidades individuais encapsuladas em blocos try-catch para isolamento
+    // 3. Executa as sincronias de entidades individuais
     
     // --- 3.1 Detalhes Cadastrais & Reputação ---
     try {
@@ -155,31 +140,37 @@ export class MercadoLivreSyncService {
         const details = await MercadoLivreApiService.fetchAccountDetails(accessToken);
         
         // Atualiza e-mail e status se alterados
-        await prisma.mercadoLivreAccount.update({
-          where: { id: accountId },
-          data: {
-            email: details.email || account.email,
-            status: "CONNECTED",
-          },
+        await pbAdmin.collection("mercado_livre_accounts").update(account.id, {
+          email: details.email || account.email,
+          status: "CONNECTED",
         });
 
         // Reputação
         if (details.seller_reputation) {
           const rep = details.seller_reputation;
-          const repRecord = await prisma.sellerReputation.create({
-            data: {
-              organizationId,
-              mercadoLivreAccountId: accountId,
-              levelId: rep.level_id || "unknown",
-              powerSellerStatus: rep.power_seller_status,
-              claimsRate: rep.metrics?.claims?.rate || 0,
-              delayedHandlingTimeRate: rep.metrics?.delayed_handling_time?.rate || 0,
-              cancellationsRate: rep.metrics?.cancellations?.rate || 0,
-              salesPeriod: rep.transactions?.period || "unknown",
-              salesCompleted: rep.transactions?.completed || 0,
-            },
-          });
-          report.reputationLevel = repRecord.levelId || undefined;
+          const repData = {
+            organization: organizationId,
+            account: accountId,
+            levelId: rep.level_id || "unknown",
+            powerSellerStatus: rep.power_seller_status || "",
+            transactionsTotal: rep.transactions?.total || 0,
+            transactionsCompleted: rep.transactions?.completed || 0,
+            transactionsCanceled: rep.transactions?.canceled || 0,
+            metricsSalesCompleted: rep.metrics?.sales?.completed || 0,
+          };
+
+          let repRecord;
+          try {
+            repRecord = await pbAdmin.collection("seller_reputations").getFirstListItem(`account="${accountId}"`);
+          } catch(e) {}
+
+          if (repRecord) {
+            await pbAdmin.collection("seller_reputations").update(repRecord.id, repData);
+            report.reputationLevel = repData.levelId;
+          } else {
+            const created = await pbAdmin.collection("seller_reputations").create(repData);
+            report.reputationLevel = created.levelId;
+          }
         }
       }
     } catch (err: any) {
@@ -194,37 +185,29 @@ export class MercadoLivreSyncService {
         const listings = await MercadoLivreApiService.fetchListings(account.meliUserId, accessToken);
         
         for (const item of listings) {
-          await prisma.listing.upsert({
-            where: {
-              mercadoLivreAccountId_mlItemId: {
-                mercadoLivreAccountId: accountId,
-                mlItemId: item.id,
-              },
-            },
-            update: {
-              title: item.title,
-              price: item.price,
-              currencyId: item.currency_id || "BRL",
-              availableQuantity: item.available_quantity || 0,
-              soldQuantity: item.sold_quantity || 0,
-              status: item.status || "active",
-              permalink: item.permalink,
-              thumbnail: item.thumbnail,
-            },
-            create: {
-              organizationId,
-              mercadoLivreAccountId: accountId,
-              mlItemId: item.id,
-              title: item.title,
-              price: item.price,
-              currencyId: item.currency_id || "BRL",
-              availableQuantity: item.available_quantity || 0,
-              soldQuantity: item.sold_quantity || 0,
-              status: item.status || "active",
-              permalink: item.permalink,
-              thumbnail: item.thumbnail,
-            },
-          });
+          const listingData = {
+            organization: organizationId,
+            account: accountId,
+            mlItemId: item.id,
+            title: item.title || "",
+            price: item.price || 0,
+            availableQuantity: item.available_quantity || 0,
+            soldQuantity: item.sold_quantity || 0,
+            condition: item.condition || "",
+            permalink: item.permalink || "",
+            thumbnail: item.thumbnail || "",
+            status: item.status || "active",
+            catalogProductId: item.catalog_product_id || "",
+            health: item.health || 0,
+            visits: 0
+          };
+
+          try {
+            const existing = await pbAdmin.collection("listings").getFirstListItem(`account="${accountId}" && mlItemId="${item.id}"`);
+            await pbAdmin.collection("listings").update(existing.id, listingData);
+          } catch (e) {
+            await pbAdmin.collection("listings").create(listingData);
+          }
           report.listingsCount++;
         }
       }
@@ -234,96 +217,29 @@ export class MercadoLivreSyncService {
 
     await this.reportProgress(onProgress, 45);
 
-    // --- 3.3 Vendas (Orders, OrderItems & Shipments) ---
+    // --- 3.3 Vendas (Orders) ---
     try {
       if (!isMock) {
         const orders = await MercadoLivreApiService.fetchOrders(account.meliUserId, accessToken);
 
         for (const order of orders) {
-          // Upsert da Order
-          const localOrder = await prisma.order.upsert({
-            where: {
-              mercadoLivreAccountId_mlOrderId: {
-                mercadoLivreAccountId: accountId,
-                mlOrderId: order.id.toString(),
-              },
-            },
-            update: {
-              status: order.status,
-              totalAmount: order.total_amount,
-              buyerNickname: order.buyer?.nickname || "Desconhecido",
-              buyerId: order.buyer?.id?.toString() || "0",
-              dateCreated: new Date(order.date_created),
-              dateClosed: order.date_closed ? new Date(order.date_closed) : null,
-            },
-            create: {
-              organizationId,
-              mercadoLivreAccountId: accountId,
-              mlOrderId: order.id.toString(),
-              status: order.status,
-              totalAmount: order.total_amount,
-              buyerNickname: order.buyer?.nickname || "Desconhecido",
-              buyerId: order.buyer?.id?.toString() || "0",
-              dateCreated: new Date(order.date_created),
-              dateClosed: order.date_closed ? new Date(order.date_closed) : null,
-            },
-          });
+          const orderData = {
+            organization: organizationId,
+            account: accountId,
+            mlOrderId: order.id.toString(),
+            status: order.status,
+            dateCreated: new Date(order.date_created).toISOString(),
+            totalAmount: order.total_amount,
+            currencyId: order.currency_id || "BRL",
+            buyerNickname: order.buyer?.nickname || "Desconhecido",
+            itemCount: order.order_items ? order.order_items.length : 0
+          };
 
-          // Atualiza os OrderItems deletando os antigos e recriando para evitar duplicatas
-          await prisma.orderItem.deleteMany({
-            where: { orderId: localOrder.id },
-          });
-
-          if (order.order_items && order.order_items.length > 0) {
-            await prisma.orderItem.createMany({
-              data: order.order_items.map((item) => ({
-                orderId: localOrder.id,
-                mlItemId: item.item.id,
-                title: item.item.title,
-                quantity: item.quantity || 1,
-                unitPrice: item.unit_price,
-              })),
-            });
-          }
-
-          // Rastreia e sincroniza dados físicos de postagem (Shipment)
-          if (order.shipping && order.shipping.id) {
-            try {
-              const shipment = await MercadoLivreApiService.fetchShipment(
-                order.shipping.id.toString(),
-                accessToken
-              );
-
-              await prisma.shipment.upsert({
-                where: { orderId: localOrder.id },
-                update: {
-                  mlShipmentId: shipment.id.toString(),
-                  status: shipment.status,
-                  trackingNumber: shipment.tracking_number,
-                  trackingMethod: shipment.tracking_method,
-                  serviceId: shipment.service_id != null ? String(shipment.service_id) : null,
-                  dateCreated: new Date(shipment.date_created),
-                  dateFirstPrinted: shipment.date_first_printed ? new Date(shipment.date_first_printed) : null,
-                  dateShipped: shipment.status_history?.date_shipped ? new Date(shipment.status_history.date_shipped) : null,
-                  dateDelivered: shipment.status_history?.date_delivered ? new Date(shipment.status_history.date_delivered) : null,
-                },
-                create: {
-                  orderId: localOrder.id,
-                  mercadoLivreAccountId: accountId,
-                  mlShipmentId: shipment.id.toString(),
-                  status: shipment.status,
-                  trackingNumber: shipment.tracking_number,
-                  trackingMethod: shipment.tracking_method,
-                  serviceId: shipment.service_id != null ? String(shipment.service_id) : null,
-                  dateCreated: new Date(shipment.date_created),
-                  dateFirstPrinted: shipment.date_first_printed ? new Date(shipment.date_first_printed) : null,
-                  dateShipped: shipment.status_history?.date_shipped ? new Date(shipment.status_history.date_shipped) : null,
-                  dateDelivered: shipment.status_history?.date_delivered ? new Date(shipment.status_history.date_delivered) : null,
-                },
-              });
-            } catch (shipErr: any) {
-              report.errors.push(`Erro ao sincronizar envio ${order.shipping.id}: ${shipErr.message || shipErr}`);
-            }
+          try {
+            const existing = await pbAdmin.collection("orders").getFirstListItem(`account="${accountId}" && mlOrderId="${order.id.toString()}"`);
+            await pbAdmin.collection("orders").update(existing.id, orderData);
+          } catch (e) {
+            await pbAdmin.collection("orders").create(orderData);
           }
 
           report.ordersCount++;
@@ -341,35 +257,23 @@ export class MercadoLivreSyncService {
         const questions = await MercadoLivreApiService.fetchQuestions(account.meliUserId, accessToken);
 
         for (const question of questions) {
-          await prisma.question.upsert({
-            where: {
-              mercadoLivreAccountId_mlQuestionId: {
-                mercadoLivreAccountId: accountId,
-                mlQuestionId: question.id.toString(),
-              },
-            },
-            update: {
-              mlItemId: question.item_id,
-              text: question.text,
-              status: question.status,
-              answerText: question.answer ? question.answer.text : null,
-              answerDate: question.answer ? new Date(question.answer.date_created) : null,
-              buyerId: question.from?.id?.toString() || "0",
-              dateCreated: new Date(question.date_created),
-            },
-            create: {
-              organizationId,
-              mercadoLivreAccountId: accountId,
-              mlQuestionId: question.id.toString(),
-              mlItemId: question.item_id,
-              text: question.text,
-              status: question.status,
-              answerText: question.answer ? question.answer.text : null,
-              answerDate: question.answer ? new Date(question.answer.date_created) : null,
-              buyerId: question.from?.id?.toString() || "0",
-              dateCreated: new Date(question.date_created),
-            },
-          });
+          const questionData = {
+            organization: organizationId,
+            account: accountId,
+            mlQuestionId: question.id.toString(),
+            itemId: question.item_id,
+            status: question.status,
+            text: question.text,
+            answer: question.answer ? question.answer.text : "",
+            dateCreated: new Date(question.date_created).toISOString()
+          };
+
+          try {
+            const existing = await pbAdmin.collection("questions").getFirstListItem(`account="${accountId}" && mlQuestionId="${question.id.toString()}"`);
+            await pbAdmin.collection("questions").update(existing.id, questionData);
+          } catch (e) {
+            await pbAdmin.collection("questions").create(questionData);
+          }
           report.questionsCount++;
         }
       }
@@ -385,30 +289,22 @@ export class MercadoLivreSyncService {
         const promos = await MercadoLivreApiService.fetchPromotions(account.meliUserId, accessToken);
 
         for (const promo of promos) {
-          await prisma.promotion.upsert({
-            where: {
-              organizationId_mlPromotionId: {
-                organizationId,
-                mlPromotionId: promo.id,
-              },
-            },
-            update: {
-              name: promo.name || "Promoção sem nome",
-              type: promo.type || "deal",
-              status: promo.status || "active",
-              startDate: new Date(promo.start_date),
-              endDate: new Date(promo.deadline_date),
-            },
-            create: {
-              organizationId,
-              mlPromotionId: promo.id,
-              name: promo.name || "Promoção sem nome",
-              type: promo.type || "deal",
-              status: promo.status || "active",
-              startDate: new Date(promo.start_date),
-              endDate: new Date(promo.deadline_date),
-            },
-          });
+          const promoData = {
+            organization: organizationId,
+            mlPromotionId: promo.id,
+            name: promo.name || "Promoção sem nome",
+            type: promo.type || "deal",
+            status: promo.status || "active",
+            startDate: new Date(promo.start_date).toISOString(),
+            endDate: new Date(promo.deadline_date).toISOString()
+          };
+
+          try {
+            const existing = await pbAdmin.collection("promotions").getFirstListItem(`organization="${organizationId}" && mlPromotionId="${promo.id}"`);
+            await pbAdmin.collection("promotions").update(existing.id, promoData);
+          } catch (e) {
+            await pbAdmin.collection("promotions").create(promoData);
+          }
           report.promotionsCount++;
         }
       }
@@ -424,27 +320,21 @@ export class MercadoLivreSyncService {
         const campaigns = await MercadoLivreApiService.fetchCampaigns(account.meliUserId, accessToken);
 
         for (const camp of campaigns) {
-          await prisma.advertisingCampaign.upsert({
-            where: {
-              organizationId_mlCampaignId: {
-                organizationId,
-                mlCampaignId: camp.id.toString(),
-              },
-            },
-            update: {
-              name: camp.name || "Campanha Product Ads",
-              status: camp.status || "active",
-              budget: camp.daily_budget || 0,
-            },
-            create: {
-              organizationId,
-              mlCampaignId: camp.id.toString(),
-              name: camp.name || "Campanha Product Ads",
-              status: camp.status || "active",
-              budget: camp.daily_budget || 0,
-              budgetType: "daily",
-            },
-          });
+          const campData = {
+            organization: organizationId,
+            mlCampaignId: camp.id.toString(),
+            name: camp.name || "Campanha Product Ads",
+            status: camp.status || "active",
+            budget: camp.daily_budget || 0,
+            budgetType: "daily",
+          };
+
+          try {
+            const existing = await pbAdmin.collection("advertising_campaigns").getFirstListItem(`organization="${organizationId}" && mlCampaignId="${camp.id.toString()}"`);
+            await pbAdmin.collection("advertising_campaigns").update(existing.id, campData);
+          } catch (e) {
+            await pbAdmin.collection("advertising_campaigns").create(campData);
+          }
           report.campaignsCount++;
         }
       }
@@ -488,18 +378,15 @@ export class MercadoLivreSyncService {
     ipAddress?: string
   ): Promise<void> {
     try {
-      await prisma.auditLog.create({
-        data: {
-          organizationId,
-          userId,
-          mercadoLivreAccountId: meliAccountId,
-          action,
-          details,
-          ipAddress: ipAddress || "127.0.0.1",
-        },
+      await pbAdmin.collection("audit_logs").create({
+        organization: organizationId,
+        user: userId,
+        action,
+        details,
+        ipAddress: ipAddress || "127.0.0.1",
       });
     } catch (err) {
-      console.error("Erro crítico ao gravar AuditLog:", err);
+      console.error("Erro crítico ao gravar audit_logs:", err);
     }
   }
 }

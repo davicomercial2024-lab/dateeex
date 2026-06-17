@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
-import { prisma } from "@/lib/prisma";
+import { pbAdmin } from "@/lib/pb";
 import { verifyToken } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
@@ -15,33 +15,32 @@ export async function GET() {
       return NextResponse.json({ error: "Sessão não encontrada." }, { status: 401 });
     }
 
-    // Valida o token
+    // Valida o token customizado
     const payload = await verifyToken(sessionCookie.value);
 
     if (!payload) {
       return NextResponse.json({ error: "Sessão inválida ou expirada." }, { status: 401 });
     }
 
-    // Busca usuário no banco com o membro e a organização correspondente
-    const user = await prisma.user.findUnique({
-      where: { id: payload.userId },
-      include: {
-        memberships: {
-          where: { organizationId: payload.orgId },
-          include: {
-            organization: true,
-          },
-        },
-      },
-    });
+    // Autentica admin para queries
+    await pbAdmin.admins.authWithPassword(process.env.PB_ADMIN_EMAIL || 'bbbaterias@bbdi.com.br', process.env.PB_ADMIN_PASS || 'diev1pn4753ikpf');
 
-    if (!user) {
+    // Busca usuário no PocketBase
+    let user;
+    try {
+      user = await pbAdmin.collection("users").getOne(payload.userId as string);
+    } catch (e) {
       return NextResponse.json({ error: "Usuário não encontrado." }, { status: 404 });
     }
 
-    const activeMembership = user.memberships[0];
-
-    if (!activeMembership) {
+    // Busca o vínculo na organização atual
+    let activeMembership;
+    try {
+      activeMembership = await pbAdmin.collection("organization_members").getFirstListItem(
+        `user="${payload.userId}" && organization="${payload.orgId}"`,
+        { expand: "organization" }
+      );
+    } catch (e) {
       return NextResponse.json(
         { error: "Vínculo de organização não encontrado." },
         { status: 404 }
@@ -57,8 +56,8 @@ export async function GET() {
         role: activeMembership.role,
       },
       organization: {
-        id: activeMembership.organization.id,
-        name: activeMembership.organization.name,
+        id: activeMembership.expand?.organization?.id,
+        name: activeMembership.expand?.organization?.name,
       },
     });
   } catch (error) {

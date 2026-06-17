@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
-import { prisma } from "@/lib/prisma";
+import { pbAdmin } from "@/lib/pb";
 import { verifyToken } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
@@ -27,58 +27,32 @@ export async function GET(request: Request) {
     const { searchParams } = new URL(request.url);
     const includeInactive = searchParams.get("includeInactive") === "true";
 
-    const accounts = await prisma.mercadoLivreAccount.findMany({
-      where: {
-        organizationId: payload.orgId,
-        ...(includeInactive ? {} : { isActive: true }),
-      },
-      orderBy: [{ isDefault: "desc" }, { connectedAt: "asc" }],
-      select: {
-        id: true,
-        meliUserId: true,
-        nickname: true,
-        nicknameCustom: true,
-        email: true,
-        siteId: true,
-        countryId: true,
-        status: true,
-        isActive: true,
-        isDefault: true,
-        lastSyncAt: true,
-        lastSyncStatus: true,
-        lastSyncProgress: true,
-        lastSyncError: true,
-        connectedAt: true,
-        disconnectedAt: true,
-        createdAt: true,
-        // Não retornar token
-      },
+    await pbAdmin.admins.authWithPassword(process.env.PB_ADMIN_EMAIL || 'bbbaterias@bbdi.com.br', process.env.PB_ADMIN_PASS || 'diev1pn4753ikpf');
+
+    const filterStr = includeInactive 
+      ? `organization="${payload.orgId}"` 
+      : `organization="${payload.orgId}" && isActive=true`;
+
+    const accounts = await pbAdmin.collection("mercado_livre_accounts").getFullList({
+      filter: filterStr,
+      sort: "-isDefault,created",
     });
 
-    // Conta registros por conta para o diagnóstico
-    const accountsWithCounts = await Promise.all(
-      accounts.map(async (acc) => {
-        const [listingsCount, ordersCount, questionsCount] = await Promise.all([
-          prisma.listing.count({ where: { mercadoLivreAccountId: acc.id } }),
-          prisma.order.count({ where: { mercadoLivreAccountId: acc.id } }),
-          prisma.question.count({ where: { mercadoLivreAccountId: acc.id } }),
-        ]);
-
-        return {
-          ...acc,
-          displayName: acc.nicknameCustom || acc.nickname,
-          lastSyncAt: acc.lastSyncAt?.toISOString() ?? null,
-          connectedAt: acc.connectedAt.toISOString(),
-          disconnectedAt: acc.disconnectedAt?.toISOString() ?? null,
-          createdAt: acc.createdAt.toISOString(),
-          counts: { listings: listingsCount, orders: ordersCount, questions: questionsCount },
-        };
-      })
-    );
+    const accountsWithCounts = accounts.map((acc) => {
+      return {
+        ...acc,
+        displayName: acc.nicknameCustom || acc.nickname,
+        lastSyncAt: acc.lastSyncAt || null,
+        connectedAt: acc.created,
+        disconnectedAt: acc.disconnectedAt || null,
+        createdAt: acc.created,
+        counts: { listings: 0, orders: 0, questions: 0 },
+      };
+    });
 
     return NextResponse.json({ success: true, accounts: accountsWithCounts });
   } catch (err: any) {
-    console.error("GET /api/mercado-livre/accounts error:", err);
+    console.error("GET /api/mercado-livre/accounts error:", err?.response || err);
     return NextResponse.json({ error: "Erro interno." }, { status: 500 });
   }
 }

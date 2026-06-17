@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
-import { prisma } from "@/lib/prisma";
+import { pbAdmin } from "@/lib/pb";
 import { verifyToken } from "@/lib/auth";
 import {
   PublicidadeApiService,
@@ -66,16 +66,27 @@ export async function GET(request: Request) {
     const brandCampaignId = searchParams.get("brandCampaignId") || "";
     const displayCampaignId = searchParams.get("displayCampaignId") || "";
 
-    const accounts = await prisma.mercadoLivreAccount.findMany({
-      where: {
-        organizationId: session.orgId,
-        isActive: true,
-        status: "CONNECTED",
-        ...(accountId !== "all" ? { id: accountId } : {}),
-      },
-      include: { token: true },
-      orderBy: [{ isDefault: "desc" }, { nickname: "asc" }],
+    let filter = `organization = "${session.orgId}" && isActive = true && status = "CONNECTED"`;
+    if (accountId && accountId !== "all") {
+      filter += ` && id = "${accountId}"`;
+    }
+
+    const pbAccounts = await pbAdmin.collection("mercado_livre_accounts").getFullList({
+      filter,
+      sort: "-isDefault,nickname",
     });
+
+    const accountIds = pbAccounts.map(a => a.id);
+    let tokens: any[] = [];
+    if (accountIds.length > 0) {
+      const tokensFilter = accountIds.map(id => `account = "${id}"`).join(" || ");
+      tokens = await pbAdmin.collection("oauth_tokens").getFullList({ filter: tokensFilter });
+    }
+
+    const accounts = pbAccounts.map(acc => ({
+      ...acc,
+      token: tokens.find(t => t.account === acc.id) || null
+    }));
 
     const accountSummaries: Array<{
       id: string;

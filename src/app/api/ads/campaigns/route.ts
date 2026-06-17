@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { verifyToken } from "@/lib/auth";
-import { prisma } from "@/lib/prisma";
+import { pbAdmin } from "@/lib/pb";
 import { MercadoLivreApiService } from "@/services/mercado-livre-api.service";
 
 export async function GET(request: Request) {
@@ -19,15 +19,26 @@ export async function GET(request: Request) {
     const dateTo = searchParams.get("dateTo") || new Date().toISOString().split('T')[0];
 
     // Busca a conta e o token
-    let whereClause: any = { organizationId: session.orgId, isActive: true, status: "CONNECTED" };
+    let filter = `organization = "${session.orgId}" && isActive = true && status = "CONNECTED"`;
     if (accountId && accountId !== "all") {
-      whereClause.id = accountId;
+      filter += ` && id = "${accountId}"`;
     }
 
-    const accounts = await prisma.mercadoLivreAccount.findMany({
-      where: whereClause,
-      include: { token: true },
+    const pbAccounts = await pbAdmin.collection("mercado_livre_accounts").getFullList({
+      filter,
     });
+
+    const accountIds = pbAccounts.map(a => a.id);
+    let tokens: any[] = [];
+    if (accountIds.length > 0) {
+      const tokensFilter = accountIds.map(id => `account = "${id}"`).join(" || ");
+      tokens = await pbAdmin.collection("oauth_tokens").getFullList({ filter: tokensFilter });
+    }
+
+    const accounts = pbAccounts.map(acc => ({
+      ...acc,
+      token: tokens.find(t => t.account === acc.id) || null
+    }));
 
     if (accounts.length === 0) {
       return NextResponse.json({ success: true, campaigns: [], summary: {} });

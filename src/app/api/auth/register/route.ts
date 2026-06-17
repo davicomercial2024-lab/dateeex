@@ -1,12 +1,9 @@
 import { NextResponse } from "next/server";
-import bcrypt from "bcryptjs";
-import { prisma } from "@/lib/prisma";
+import { pbAdmin } from "@/lib/pb";
 import { createToken } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
-
-type TransactionClient = Parameters<Parameters<typeof prisma.$transaction>[0]>[0];
 
 export async function POST(request: Request) {
   try {
@@ -28,54 +25,57 @@ export async function POST(request: Request) {
 
     const normalizedEmail = email.toLowerCase().trim();
 
-    // Verifica se o usuário já existe
-    const existingUser = await prisma.user.findUnique({
-      where: { email: normalizedEmail },
-    });
+    // Authenticate admin to perform operations (you could also do this once globally, but it expires)
+    await pbAdmin.admins.authWithPassword(process.env.PB_ADMIN_EMAIL || 'bbbaterias@bbdi.com.br', process.env.PB_ADMIN_PASS || 'diev1pn4753ikpf');
 
-    if (existingUser) {
-      return NextResponse.json(
-        { error: "Este e-mail já está cadastrado no Datex." },
-        { status: 400 }
-      );
+    // Verifica se o usuário já existe no PocketBase
+    try {
+      const existingUser = await pbAdmin.collection("users").getFirstListItem(`email="${normalizedEmail}"`);
+      if (existingUser) {
+        return NextResponse.json(
+          { error: "Este e-mail já está cadastrado no Datex." },
+          { status: 400 }
+        );
+      }
+    } catch (e: any) {
+      // getFirstListItem throws 404 if not found, which is what we want
+      if (e.status !== 404) {
+        throw e;
+      }
     }
 
-    // Criptografa a senha do usuário
-    const passwordHash = await bcrypt.hash(password, 10);
-
-    // Criação atômica no banco via transação (User -> Org -> Member ADMIN)
-    const { user, organization } = await prisma.$transaction(async (tx: TransactionClient) => {
-      const newUser = await tx.user.create({
-        data: {
-          name: name.trim(),
-          email: normalizedEmail,
-          passwordHash,
-        },
-      });
-
-      const newOrg = await tx.organization.create({
-        data: {
-          name: company.trim(),
-        },
-      });
-
-      await tx.organizationMember.create({
-        data: {
-          organizationId: newOrg.id,
-          userId: newUser.id,
-          role: "ADMIN", // Primeiro usuário é o administrador do tenant
-        },
-      });
-
-      return { user: newUser, organization: newOrg };
+    // Cria o usuário no PocketBase
+    const newUser = await pbAdmin.collection("users").create({
+      email: normalizedEmail,
+      password: password,
+      passwordConfirm: password,
+      name: name.trim(),
+      emailVisibility: true,
     });
 
-    // Cria o token de sessão JWT
-    const token = await createToken({ userId: user.id, orgId: organization.id });
+    // Cria a organização
+    const newOrg = await pbAdmin.collection("organizations").create({
+      name: company.trim(),
+      plan: "FREE",
+    });
 
-    // Prepara a resposta com cookie HTTP-only
+    // Associa o usuário à organização como ADMIN
+    await pbAdmin.collection("organization_members").create({
+      organization: newOrg.id,
+      user: newUser.id,
+      role: "ADMIN",
+    });
+
+    // Atualiza o currentOrganizationId do usuário
+    await pbAdmin.collection("users").update(newUser.id, {
+      currentOrganizationId: newOrg.id,
+    });
+
+    // Cria o token de sessão JWT customizado do Datex
+    const token = await createToken({ userId: newUser.id, orgId: newOrg.id });
+
     const response = NextResponse.json(
-      { success: true, user: { name: user.name, email: user.email } },
+      { success: true, user: { name: newUser.name, email: newUser.email } },
       { status: 201 }
     );
 
@@ -90,8 +90,8 @@ export async function POST(request: Request) {
     });
 
     return response;
-  } catch (error) {
-    console.error("Register Error:", error);
+  } catch (error: any) {
+    console.error("Register Error:", error?.response || error);
     return NextResponse.json(
       { error: "Falha interna ao criar conta. Tente novamente." },
       { status: 500 }

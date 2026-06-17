@@ -80,6 +80,7 @@ export default function DashboardLayout({
           <Sidebar
             isOpenMobile={isMobileSidebarOpen}
             onCloseMobile={() => setIsMobileSidebarOpen(false)}
+            user={user}
           />
 
           {/* Main Content Area */}

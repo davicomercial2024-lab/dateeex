@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
-import { prisma } from "@/lib/prisma";
+import { pbAdmin } from "@/lib/pb";
 import { verifyToken } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
@@ -18,41 +18,44 @@ export async function GET(request: Request) {
     const { searchParams } = new URL(request.url);
     const accountId = searchParams.get("accountId") || "all";
 
-    const accounts = await prisma.mercadoLivreAccount.findMany({
-      where: {
-        organizationId: payload.orgId,
-        ...(accountId !== "all" ? { id: accountId } : {}),
-      },
-      include: { token: true },
-      orderBy: { createdAt: "asc" },
+    let filter = pbAdmin.filter("organization = {:orgId}", { orgId: payload.orgId });
+    if (accountId !== "all") {
+      filter += pbAdmin.filter(" && id = {:accountId}", { accountId });
+    }
+
+    const accounts = await pbAdmin.collection("mercado_livre_accounts").getFullList({
+      filter,
+      sort: "created",
     });
 
     const diagnostics = await Promise.all(
       accounts.map(async (acc) => {
         const now = new Date();
-        const isExpired = acc.token ? acc.token.expiresAt < now : true;
-        const isMock = acc.token ? acc.token.accessToken.includes("mock-token") : false;
+        const tokens = await pbAdmin.collection("oauth_tokens").getFullList({
+          filter: pbAdmin.filter("account = {:id}", { id: acc.id }),
+        });
+        const token = tokens[0] || null;
+        
+        const isExpired = token ? new Date(token.expiresAt) < now : true;
+        const isMock = token ? token.accessToken.includes("mock-token") : false;
 
-        const [listingsCount, ordersCount, questionsCount] = await Promise.all([
-          prisma.listing.count({ where: { mercadoLivreAccountId: acc.id } }),
-          prisma.order.count({ where: { mercadoLivreAccountId: acc.id } }),
-          prisma.question.count({ where: { mercadoLivreAccountId: acc.id } }),
+        const [listingsRes, ordersRes, questionsRes] = await Promise.all([
+          pbAdmin.collection("listings").getList(1, 1, { filter: pbAdmin.filter("account = {:id}", { id: acc.id }) }),
+          pbAdmin.collection("orders").getList(1, 1, { filter: pbAdmin.filter("account = {:id}", { id: acc.id }) }),
+          pbAdmin.collection("questions").getList(1, 1, { filter: pbAdmin.filter("account = {:id}", { id: acc.id }) }),
         ]);
 
-        const lastAuditLog = await prisma.auditLog.findFirst({
-          where: { mercadoLivreAccountId: acc.id },
-          orderBy: { createdAt: "desc" },
-          select: { action: true, details: true, createdAt: true },
-        });
+        const lastAuditLogRes = await pbAdmin.collection("audit_logs").getList(1, 1, {
+          filter: pbAdmin.filter("mercadoLivreAccountId = {:id}", { id: acc.id }),
+          sort: "-created",
+        }).catch(() => ({ items: [] }));
+        const lastAuditLog = lastAuditLogRes.items[0] || null;
 
-        const lastSyncLog = await prisma.auditLog.findFirst({
-          where: {
-            mercadoLivreAccountId: acc.id,
-            action: { in: ["SYNC_SUCCESS", "SYNC_PARTIAL", "SYNC_FAILED"] },
-          },
-          orderBy: { createdAt: "desc" },
-          select: { action: true, details: true, createdAt: true },
-        });
+        const lastSyncLogRes = await pbAdmin.collection("audit_logs").getList(1, 1, {
+          filter: pbAdmin.filter("mercadoLivreAccountId = {:id} && (action = 'SYNC_SUCCESS' || action = 'SYNC_PARTIAL' || action = 'SYNC_FAILED')", { id: acc.id }),
+          sort: "-created",
+        }).catch(() => ({ items: [] }));
+        const lastSyncLog = lastSyncLogRes.items[0] || null;
 
         return {
           account: {
@@ -64,17 +67,17 @@ export async function GET(request: Request) {
             lastSyncStatus: acc.lastSyncStatus,
             lastSyncProgress: acc.lastSyncProgress,
           },
-          token: acc.token
+          token: token
             ? {
-                expiresAt: acc.token.expiresAt.toISOString(),
+                expiresAt: new Date(token.expiresAt).toISOString(),
                 isExpired,
                 isMock,
-                minutesUntilExpiry: Math.floor((acc.token.expiresAt.getTime() - now.getTime()) / 60000),
+                minutesUntilExpiry: Math.floor((new Date(token.expiresAt).getTime() - now.getTime()) / 60000),
               }
             : null,
-          counts: { listings: listingsCount, orders: ordersCount, questions: questionsCount },
-          lastAuditLog: lastAuditLog ? { ...lastAuditLog, createdAt: lastAuditLog.createdAt.toISOString() } : null,
-          lastSyncLog: lastSyncLog ? { ...lastSyncLog, createdAt: lastSyncLog.createdAt.toISOString() } : null,
+          counts: { listings: listingsRes.totalItems, orders: ordersRes.totalItems, questions: questionsRes.totalItems },
+          lastAuditLog: lastAuditLog ? { action: lastAuditLog.action, details: lastAuditLog.details, createdAt: new Date(lastAuditLog.created).toISOString() } : null,
+          lastSyncLog: lastSyncLog ? { action: lastSyncLog.action, details: lastSyncLog.details, createdAt: new Date(lastSyncLog.created).toISOString() } : null,
         };
       })
     );
@@ -102,20 +105,26 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "accountId e obrigatorio." }, { status: 400 });
     }
 
-    const account = await prisma.mercadoLivreAccount.findFirst({
-      where: { id: accountId, organizationId: payload.orgId },
-      include: { token: true },
+    const accounts = await pbAdmin.collection("mercado_livre_accounts").getFullList({
+      filter: pbAdmin.filter("id = {:accountId} && organization = {:orgId}", { accountId, orgId: payload.orgId }),
     });
+    const account = accounts[0] || null;
 
     if (!account) return NextResponse.json({ error: "Conta nao encontrada." }, { status: 404 });
-    if (!account.token) {
+    
+    const tokens = await pbAdmin.collection("oauth_tokens").getFullList({
+      filter: pbAdmin.filter("account = {:id}", { id: account.id }),
+    });
+    const token = tokens[0] || null;
+
+    if (!token) {
       return NextResponse.json({
         success: true,
         testResult: { ok: false, statusCode: 0, error: "Nenhum token salvo para esta conta." },
       });
     }
 
-    if (account.token.accessToken.includes("mock-token")) {
+    if (token.accessToken.includes("mock-token")) {
       return NextResponse.json({
         success: true,
         testResult: {
@@ -128,7 +137,7 @@ export async function POST(request: Request) {
 
     const meliRes = await fetch("https://api.mercadolibre.com/users/me", {
       headers: {
-        Authorization: `Bearer ${account.token.accessToken}`,
+        Authorization: `Bearer ${token.accessToken}`,
         Accept: "application/json",
       },
       signal: AbortSignal.timeout(10000),

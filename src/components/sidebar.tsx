@@ -20,6 +20,7 @@ import {
   CircleDollarSign,
   Ticket,
   Tag,
+  Users,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -27,9 +28,10 @@ interface SidebarProps {
   className?: string;
   isOpenMobile?: boolean;
   onCloseMobile?: () => void;
+  user?: { name: string; email: string; role: string } | null;
 }
 
-export function Sidebar({ className, isOpenMobile, onCloseMobile }: SidebarProps) {
+export function Sidebar({ className, isOpenMobile, onCloseMobile, user }: SidebarProps) {
   const pathname = usePathname();
 
   const menuItems = [
@@ -181,6 +183,33 @@ export function Sidebar({ className, isOpenMobile, onCloseMobile }: SidebarProps
             </div>
           )}
         </div>
+
+        {user?.role === "ADMIN" && (
+          <div className="mt-3 border-t border-border/30 pt-3">
+            <div className="mb-1 px-3 text-[10px] font-bold uppercase tracking-widest text-muted-foreground/60">
+              Administração
+            </div>
+            <Link
+              href="/admin/usuarios"
+              onClick={onCloseMobile}
+              className={cn(
+                "group relative flex items-center gap-3 rounded-xl px-4 py-3 text-[13px] font-medium tracking-wide transition-all duration-200",
+                pathname.startsWith("/admin/usuarios")
+                  ? "bg-gradient-to-r from-primary to-indigo-600 font-semibold text-white shadow-md shadow-primary/25"
+                  : "text-muted-foreground hover:bg-accent/60 hover:text-foreground"
+              )}
+            >
+              {pathname.startsWith("/admin/usuarios") && <span className="absolute left-0 top-1/4 bottom-1/4 w-1 rounded-r-md bg-white" />}
+              <Users
+                className={cn(
+                  "h-4.5 w-4.5 shrink-0 transition-transform duration-300 group-hover:scale-110",
+                  pathname.startsWith("/admin/usuarios") ? "text-white" : "text-muted-foreground group-hover:text-foreground"
+                )}
+              />
+              <span className="truncate">Usuários da Conta</span>
+            </Link>
+          </div>
+        )}
       </nav>
 
       <div className="border-t border-border/40 p-4 text-center">

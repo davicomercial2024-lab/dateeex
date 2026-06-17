@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { verifyToken } from "@/lib/auth";
-import { prisma } from "@/lib/prisma";
+import { pbAdmin } from "@/lib/pb";
 import { MercadoLivreApiService } from "@/services/mercado-livre-api.service";
 
 type RawPromotion = Record<string, unknown>;
@@ -90,23 +90,35 @@ export async function GET(request: Request) {
     const { searchParams } = new URL(request.url);
     const accountId = searchParams.get("accountId") || "all";
 
-    const accounts = await prisma.mercadoLivreAccount.findMany({
-      where: {
-        organizationId: session.orgId,
-        isActive: true,
-        status: "CONNECTED",
-        ...(accountId !== "all" ? { id: accountId } : {}),
-      },
-      include: {
-        token: true,
-        listings: {
-          where: { status: "active" },
-          orderBy: { updatedAt: "desc" },
-          take: 250,
-        },
-      },
-      orderBy: [{ isDefault: "desc" }, { createdAt: "asc" }],
+    let filter = `organization = "${session.orgId}" && isActive = true && status = "CONNECTED"`;
+    if (accountId && accountId !== "all") {
+      filter += ` && id = "${accountId}"`;
+    }
+
+    const pbAccounts = await pbAdmin.collection("mercado_livre_accounts").getFullList({
+      filter,
+      sort: "-isDefault,created",
     });
+
+    const accountIds = pbAccounts.map(a => a.id);
+    let tokens: any[] = [];
+    let listings: any[] = [];
+    if (accountIds.length > 0) {
+      const accountsFilter = accountIds.map(id => `account = "${id}"`).join(" || ");
+      tokens = await pbAdmin.collection("oauth_tokens").getFullList({ filter: accountsFilter });
+      
+      const listingsFilter = `(${accountsFilter}) && status = "active"`;
+      listings = await pbAdmin.collection("listings").getFullList({
+         filter: listingsFilter,
+         sort: "-updated"
+      });
+    }
+
+    const accounts = pbAccounts.map(acc => ({
+      ...acc,
+      token: tokens.find(t => t.account === acc.id) || null,
+      listings: listings.filter(l => l.account === acc.id).slice(0, 250)
+    }));
 
     if (accounts.length === 0) {
       return NextResponse.json({
@@ -125,15 +137,20 @@ export async function GET(request: Request) {
       });
     }
 
-    const localOffers = await prisma.promotionOffer.findMany({
-      where: {
-        mercadoLivreAccountId: { in: accounts.map((account) => account.id) },
-      },
-      include: {
-        promotion: true,
-        listing: true,
-      },
-    });
+    let localOffers: any[] = [];
+    if (accountIds.length > 0) {
+      const offersFilter = accountIds.map(id => `account = "${id}"`).join(" || ");
+      const pbOffers = await pbAdmin.collection("promotion_offers").getFullList({
+        filter: offersFilter,
+        expand: "promotion,listing"
+      });
+      localOffers = pbOffers.map(offer => ({
+        ...offer,
+        promotion: offer.expand?.promotion || null,
+        listing: offer.expand?.listing || null,
+        listingId: offer.listing
+      }));
+    }
 
     const offerByListingId = new Map<string, typeof localOffers[number][]>();
     for (const offer of localOffers) {

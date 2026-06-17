@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
-import { prisma } from "@/lib/prisma";
+import { pbAdmin } from "@/lib/pb";
 import { verifyToken } from "@/lib/auth";
 import { MercadoLivreSyncService, SyncReport } from "@/services/mercado-livre-sync.service";
 
@@ -33,12 +33,8 @@ export async function POST(req: Request) {
     const reports: SyncReport[] = [];
 
     if (accountId === "all") {
-      const accounts = await prisma.mercadoLivreAccount.findMany({
-        where: {
-          organizationId: payload.orgId,
-          isActive: true,
-          status: "CONNECTED",
-        },
+      const accounts = await pbAdmin.collection("mercado_livre_accounts").getFullList({
+        filter: pbAdmin.filter("organization = {:orgId} && isActive = true && status = 'CONNECTED'", { orgId: payload.orgId }),
       });
 
       if (accounts.length === 0) {
@@ -50,9 +46,8 @@ export async function POST(req: Request) {
       }
 
       for (const account of accounts) {
-        await prisma.mercadoLivreAccount.update({
-          where: { id: account.id },
-          data: { lastSyncStatus: "SYNCING", lastSyncProgress: 0, lastSyncError: null },
+        await pbAdmin.collection("mercado_livre_accounts").update(account.id, {
+          lastSyncStatus: "SYNCING", lastSyncProgress: 0, lastSyncError: null
         });
 
         const report = await MercadoLivreSyncService.syncAccount(
@@ -61,28 +56,21 @@ export async function POST(req: Request) {
           payload.userId,
           ipAddress,
           async (progress) => {
-            await prisma.mercadoLivreAccount.update({
-              where: { id: account.id },
-              data: { lastSyncProgress: progress },
-            });
+            await pbAdmin.collection("mercado_livre_accounts").update(account.id, { lastSyncProgress: progress });
           }
         );
 
-        await prisma.mercadoLivreAccount.update({
-          where: { id: account.id },
-          data: {
-            lastSyncAt: new Date(),
-            lastSyncStatus: report.errors.length === 0 ? "SUCCESS" : "PARTIAL",
-            lastSyncProgress: 100,
-            lastSyncError: report.errors.length > 0 ? report.errors.join("; ") : null,
-          },
+        await pbAdmin.collection("mercado_livre_accounts").update(account.id, {
+          lastSyncAt: new Date().toISOString(),
+          lastSyncStatus: report.errors.length === 0 ? "SUCCESS" : "PARTIAL",
+          lastSyncProgress: 100,
+          lastSyncError: report.errors.length > 0 ? report.errors.join("; ") : null,
         });
         reports.push(report);
       }
     } else {
-      await prisma.mercadoLivreAccount.update({
-        where: { id: accountId },
-        data: { lastSyncStatus: "SYNCING", lastSyncProgress: 0, lastSyncError: null },
+      await pbAdmin.collection("mercado_livre_accounts").update(accountId, {
+        lastSyncStatus: "SYNCING", lastSyncProgress: 0, lastSyncError: null
       });
 
       const report = await MercadoLivreSyncService.syncAccount(
@@ -91,21 +79,15 @@ export async function POST(req: Request) {
         payload.userId,
         ipAddress,
         async (progress) => {
-          await prisma.mercadoLivreAccount.update({
-            where: { id: accountId },
-            data: { lastSyncProgress: progress },
-          });
+          await pbAdmin.collection("mercado_livre_accounts").update(accountId, { lastSyncProgress: progress });
         }
       );
 
-      await prisma.mercadoLivreAccount.update({
-        where: { id: accountId },
-        data: {
-          lastSyncAt: new Date(),
-          lastSyncStatus: report.errors.length === 0 ? "SUCCESS" : "PARTIAL",
-          lastSyncProgress: 100,
-          lastSyncError: report.errors.length > 0 ? report.errors.join("; ") : null,
-        },
+      await pbAdmin.collection("mercado_livre_accounts").update(accountId, {
+        lastSyncAt: new Date().toISOString(),
+        lastSyncStatus: report.errors.length === 0 ? "SUCCESS" : "PARTIAL",
+        lastSyncProgress: 100,
+        lastSyncError: report.errors.length > 0 ? report.errors.join("; ") : null,
       });
       reports.push(report);
     }

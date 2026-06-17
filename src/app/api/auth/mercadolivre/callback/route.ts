@@ -1,6 +1,6 @@
 import { after, NextResponse } from "next/server";
 import { cookies } from "next/headers";
-import { prisma } from "@/lib/prisma";
+import { pbAdmin } from "@/lib/pb";
 import { verifyOAuthState, verifyToken } from "@/lib/auth";
 import { MercadoLivreApiService } from "@/services/mercado-livre-api.service";
 
@@ -22,21 +22,6 @@ function redirectWithClearedState(path: string, requestUrl: string) {
   return response;
 }
 
-/**
- * GET /api/auth/mercadolivre/callback
- *
- * Callback oficial do OAuth2 do Mercado Livre.
- * URL configurada no DevCenter: https://sixties-rover-overcook.ngrok-free.dev/api/auth/mercadolivre/callback
- *
- * Fluxo:
- * 1. Recebe `code` e `state` do ML
- * 2. Troca `code` por access_token + refresh_token
- * 3. Chama /users/me para obter dados reais
- * 4. Upsert na MercadoLivreAccount (por organizationId + meliUserId)
- * 5. Upsert no OAuthToken
- * 6. Dispara sincronização inicial em background
- * 7. Redireciona para /configuracoes/contas-mercado-livre?connected=true
- */
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const code = searchParams.get("code");
@@ -46,7 +31,6 @@ export async function GET(request: Request) {
 
   const redirectBase = "/configuracoes/contas-mercado-livre";
 
-  // ── Erro retornado pelo ML (ex: usuário cancelou) ────────────────────────
   if (errorParam) {
     console.error("[ML Callback] Erro retornado pelo Mercado Livre:", errorParam, errorDescription);
     return redirectWithClearedState(
@@ -60,7 +44,6 @@ export async function GET(request: Request) {
   }
 
   try {
-    // ── 1. Valida sessão do SaaS Datex ───────────────────────────────────────
     const cookieStore = await cookies();
     const sessionCookie = cookieStore.get("datex_session");
     if (!sessionCookie) {
@@ -77,7 +60,6 @@ export async function GET(request: Request) {
       return redirectWithClearedState(`${redirectBase}?error=invalid_state`, request.url);
     }
 
-    // ── 2. Carrega credenciais do .env ────────────────────────────────────────
     const clientId = process.env.MERCADO_LIVRE_CLIENT_ID;
     const clientSecret = process.env.MERCADO_LIVRE_CLIENT_SECRET;
     const redirectUri = process.env.MERCADO_LIVRE_REDIRECT_URI;
@@ -93,7 +75,6 @@ export async function GET(request: Request) {
       return redirectWithClearedState(`${redirectBase}?error=config_missing`, request.url);
     }
 
-    // ── 3. Troca code por access_token ────────────────────────────────────────
     console.log("[ML Callback] Trocando code por token...");
     const tokenResponse = await fetch("https://api.mercadolibre.com/oauth/token", {
       method: "POST",
@@ -135,9 +116,8 @@ export async function GET(request: Request) {
     }
 
     const meliUserId = String(meliUserIdRaw);
-    const expiresAt = new Date(Date.now() + expiresIn * 1000);
+    const expiresAt = new Date(Date.now() + expiresIn * 1000).toISOString();
 
-    // ── 4. Busca dados reais em /users/me ─────────────────────────────────────
     console.log(`[ML Callback] Buscando dados reais de /users/me para ID ${meliUserId}...`);
     let nickname = `ML_${meliUserId}`;
     let email: string | null = null;
@@ -148,7 +128,6 @@ export async function GET(request: Request) {
       const userDetails = await MercadoLivreApiService.fetchAccountDetails(accessToken);
       if (userDetails?.nickname) nickname = userDetails.nickname.toUpperCase();
       if (userDetails?.email) email = userDetails.email.toLowerCase();
-      // site_id e country_id podem estar disponíveis no payload
       const raw = userDetails as any;
       if (raw?.site_id) siteId = raw.site_id;
       if (raw?.address?.country_id) countryId = raw.address.country_id;
@@ -156,114 +135,95 @@ export async function GET(request: Request) {
       console.warn("[ML Callback] Não foi possível buscar /users/me, usando dados do token:", detailsErr);
     }
 
-    // ── 5. Upsert na MercadoLivreAccount ─────────────────────────────────────
     console.log(`[ML Callback] Salvando conta ${nickname} (meliUserId: ${meliUserId})...`);
     let accountId: string | null = null;
     let isNew = false;
 
-    const existingAccount = await prisma.mercadoLivreAccount.findUnique({
-      where: {
-        organizationId_meliUserId: {
-          organizationId: payload.orgId,
-          meliUserId,
-        },
-      },
-      include: {
-        token: true,
-      },
-    });
+    await pbAdmin.admins.authWithPassword(process.env.PB_ADMIN_EMAIL || 'bbbaterias@bbdi.com.br', process.env.PB_ADMIN_PASS || 'diev1pn4753ikpf');
 
-    const persistedRefreshToken = refreshToken || existingAccount?.token?.refreshToken || accessToken;
+    let existingAccount: any = null;
+    try {
+      existingAccount = await pbAdmin.collection("mercado_livre_accounts").getFirstListItem(
+        `organization="${payload.orgId}" && meliUserId="${meliUserId}"`,
+        { expand: "oauth_tokens(account)" }
+      );
+    } catch (e) {}
 
-    if (!refreshToken && !existingAccount?.token?.refreshToken) {
+    const existingToken = existingAccount?.expand?.["oauth_tokens(account)"]?.[0];
+    const persistedRefreshToken = refreshToken || existingToken?.refreshToken || accessToken;
+
+    if (!refreshToken && !existingToken?.refreshToken) {
       console.warn("[ML Callback] Mercado Livre nao retornou refresh_token; usando access_token como token temporario.");
     }
 
-    await prisma.$transaction(async (tx: any) => {
-      let account;
+    let account;
 
-      if (existingAccount) {
-        // Atualiza conta existente
-        account = await tx.mercadoLivreAccount.update({
-          where: { id: existingAccount.id },
-          data: {
-            nickname,
-            email,
-            siteId,
-            countryId,
-            status: "CONNECTED",
-            isActive: true,
-            connectedAt: new Date(),
-            disconnectedAt: null,
-            lastSyncError: null,
-          },
-        });
-        isNew = false;
-      } else {
-        // Cria nova conta
-        account = await tx.mercadoLivreAccount.create({
-          data: {
-            organizationId: payload.orgId,
-            meliUserId,
-            nickname,
-            email,
-            siteId,
-            countryId,
-            status: "CONNECTED",
-            isActive: true,
-            connectedAt: new Date(),
-          },
-        });
-        isNew = true;
-      }
-
-      accountId = account.id;
-
-      // Upsert no OAuthToken
-      await tx.oAuthToken.upsert({
-        where: { mercadoLivreAccountId: account.id },
-        create: {
-          mercadoLivreAccountId: account.id,
-          accessToken,
-          refreshToken: persistedRefreshToken,
-          expiresAt,
-          scope: scope || null,
-          tokenType: tokenType || "bearer",
-        },
-        update: {
-          accessToken,
-          refreshToken: persistedRefreshToken,
-          expiresAt,
-          scope: scope || null,
-          tokenType: tokenType || "bearer",
-        },
+    if (existingAccount) {
+      account = await pbAdmin.collection("mercado_livre_accounts").update(existingAccount.id, {
+        nickname,
+        email,
+        siteId,
+        countryId,
+        status: "CONNECTED",
+        isActive: true,
+        connectedAt: new Date().toISOString(),
+        disconnectedAt: null,
+        lastSyncError: null,
       });
-
-      // Audit log
-      const ip = request.headers.get("x-forwarded-for") || "127.0.0.1";
-      await tx.auditLog.create({
-        data: {
-          organizationId: payload.orgId,
-          userId: payload.userId,
-          mercadoLivreAccountId: account.id,
-          action: isNew ? "CONNECT_ACCOUNT" : "RECONNECT_ACCOUNT",
-          details: `Conta ${isNew ? "conectada" : "reconectada"} via OAuth2 oficial. Nickname: '${nickname}', meliUserId: ${meliUserId}, site: ${siteId ?? "N/A"}.`,
-          ipAddress: ip,
-        },
+      isNew = false;
+    } else {
+      account = await pbAdmin.collection("mercado_livre_accounts").create({
+        organization: payload.orgId,
+        meliUserId,
+        nickname,
+        email,
+        siteId,
+        countryId,
+        status: "CONNECTED",
+        isActive: true,
+        connectedAt: new Date().toISOString(),
       });
+      isNew = true;
+    }
+
+    accountId = account.id;
+
+    if (existingToken) {
+      await pbAdmin.collection("oauth_tokens").update(existingToken.id, {
+        accessToken,
+        refreshToken: persistedRefreshToken,
+        expiresAt,
+        scope: scope || null,
+        tokenType: tokenType || "bearer",
+      });
+    } else {
+      await pbAdmin.collection("oauth_tokens").create({
+        account: account.id,
+        accessToken,
+        refreshToken: persistedRefreshToken,
+        expiresAt,
+        scope: scope || null,
+        tokenType: tokenType || "bearer",
+      });
+    }
+
+    const ip = request.headers.get("x-forwarded-for") || "127.0.0.1";
+    await pbAdmin.collection("audit_logs").create({
+      organization: payload.orgId,
+      user: payload.userId,
+      action: isNew ? "CONNECT_ACCOUNT" : "RECONNECT_ACCOUNT",
+      details: `Conta ${isNew ? "conectada" : "reconectada"} via OAuth2 oficial. Nickname: '${nickname}', meliUserId: ${meliUserId}, site: ${siteId ?? "N/A"}.`,
+      ipAddress: ip,
     });
 
-    // ── 6. Sincronização inicial em background ────────────────────────────────
     if (!accountId) {
       throw new Error("Conta Mercado Livre não foi persistida.");
     }
 
     const finalAccountId = accountId;
 
-    // Atualiza status para SYNCING
-    await prisma.mercadoLivreAccount.update({
-      where: { id: finalAccountId },
-      data: { lastSyncStatus: "SYNCING" },
+    await pbAdmin.collection("mercado_livre_accounts").update(finalAccountId, {
+      lastSyncStatus: "SYNCING",
     });
 
     after(async () => {
@@ -274,26 +234,20 @@ export async function GET(request: Request) {
           payload.orgId,
           payload.userId
         );
-        // Atualiza status final da sync
-        await prisma.mercadoLivreAccount.update({
-          where: { id: finalAccountId },
-          data: {
-            lastSyncAt: new Date(),
-            lastSyncStatus: report.errors.length === 0 ? "SUCCESS" : "PARTIAL",
-            lastSyncError: report.errors.length > 0 ? report.errors.join("; ") : null,
-          },
+        await pbAdmin.collection("mercado_livre_accounts").update(finalAccountId, {
+          lastSyncAt: new Date().toISOString(),
+          lastSyncStatus: report.errors.length === 0 ? "SUCCESS" : "PARTIAL",
+          lastSyncError: report.errors.length > 0 ? report.errors.join("; ") : null,
         });
       } catch (syncErr: unknown) {
         const msg = syncErr instanceof Error ? syncErr.message : String(syncErr);
         console.error(`[ML Callback] Erro na sync inicial:`, msg);
-        await prisma.mercadoLivreAccount.update({
-          where: { id: finalAccountId },
-          data: { lastSyncStatus: "FAILED", lastSyncError: msg },
+        await pbAdmin.collection("mercado_livre_accounts").update(finalAccountId, {
+          lastSyncStatus: "FAILED", lastSyncError: msg 
         });
       }
     });
 
-    // ── 7. Redireciona para a página de gerenciamento ─────────────────────────
     const successParam = isNew ? "connected=true" : "reconnected=true";
     console.log(`[ML Callback] ${isNew ? "Nova conta" : "Reconexão"} concluída: ${nickname}`);
     return redirectWithClearedState(
@@ -302,7 +256,7 @@ export async function GET(request: Request) {
     );
 
   } catch (error: any) {
-    console.error("[ML Callback] Erro crítico:", error);
+    console.error("[ML Callback] Erro crítico:", error?.response || error);
     return redirectWithClearedState(
       "/configuracoes/contas-mercado-livre?error=internal",
       request.url

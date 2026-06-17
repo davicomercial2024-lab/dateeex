@@ -1,4 +1,4 @@
-import { prisma } from "@/lib/prisma";
+import { pbAdmin } from "@/lib/pb";
 import { MercadoLivreApiService } from "./mercado-livre-api.service";
 
 /**
@@ -14,17 +14,17 @@ export class WebhookProcessorService {
    */
   static async process(webhookEventId: string): Promise<void> {
     // Carrega o evento salvo
-    const event = await prisma.webhookEvent.findUnique({
-      where: { id: webhookEventId },
-    });
+    let event;
+    try {
+      event = await pbAdmin.collection('webhook_events').getOne(webhookEventId);
+    } catch (err) {
+      return;
+    }
 
     if (!event) return;
 
     // Marca como "processing"
-    await prisma.webhookEvent.update({
-      where: { id: webhookEventId },
-      data: { status: "processing" },
-    });
+    await pbAdmin.collection('webhook_events').update(webhookEventId, { status: "processing" });
 
     try {
       const meliUserId = event.userIdMercadoLivre;
@@ -35,10 +35,10 @@ export class WebhookProcessorService {
       }
 
       // Localiza a MercadoLivreAccount pelo meliUserId
-      const account = await prisma.mercadoLivreAccount.findFirst({
-        where: { meliUserId },
-        include: { token: true },
+      const accounts = await pbAdmin.collection('mercado_livre_accounts').getFullList({
+        filter: `meliUserId="${meliUserId}"`,
       });
+      const account = accounts[0];
 
       if (!account) {
         await this.markIgnored(
@@ -48,43 +48,38 @@ export class WebhookProcessorService {
         return;
       }
 
-      // Atualiza o evento com o account_id identificado
-      await prisma.webhookEvent.update({
-        where: { id: webhookEventId },
-        data: { mercadoLivreAccountId: account.id },
-      });
-
       // Valida token
-      if (!account.token) {
+      const tokens = await pbAdmin.collection('oauth_tokens').getFullList({
+        filter: `account="${account.id}"`,
+      });
+      const token = tokens[0];
+
+      if (!token) {
         await this.markError(webhookEventId, "Conta sem token OAuth. Necessário reconectar.");
         return;
       }
 
       // Renova token se necessário (mock token: avança expiração; real: chama API)
-      let accessToken = account.token.accessToken;
+      let accessToken = token.accessToken;
       const now = new Date();
-      const isExpiring =
-        account.token.expiresAt.getTime() - now.getTime() < 5 * 60 * 1000;
+      const expiresAt = new Date(token.expiresAt);
+      const isExpiring = expiresAt.getTime() - now.getTime() < 5 * 60 * 1000;
 
       if (isExpiring) {
         try {
-          if (account.token.accessToken.includes("mock-token")) {
-            await prisma.oAuthToken.update({
-              where: { mercadoLivreAccountId: account.id },
-              data: { expiresAt: new Date(Date.now() + 6 * 3600 * 1000) },
+          if (token.accessToken.includes("mock-token")) {
+            await pbAdmin.collection('oauth_tokens').update(token.id, {
+              expiresAt: new Date(Date.now() + 6 * 3600 * 1000).toISOString()
             });
           } else {
             const refreshed = await MercadoLivreApiService.refreshToken(
-              account.token.refreshToken
+              token.refreshToken
             );
             accessToken = refreshed.access_token;
-            await prisma.oAuthToken.update({
-              where: { mercadoLivreAccountId: account.id },
-              data: {
-                accessToken: refreshed.access_token,
-                refreshToken: refreshed.refresh_token,
-                expiresAt: new Date(Date.now() + refreshed.expires_in * 1000),
-              },
+            await pbAdmin.collection('oauth_tokens').update(token.id, {
+              accessToken: refreshed.access_token,
+              refreshToken: refreshed.refresh_token,
+              expiresAt: new Date(Date.now() + refreshed.expires_in * 1000).toISOString(),
             });
           }
         } catch (err: any) {
@@ -111,14 +106,14 @@ export class WebhookProcessorService {
           event.resource,
           accessToken,
           account.id,
-          account.organizationId
+          account.organization
         );
       } else if (topic.includes("items") || resource.includes("/items")) {
         await this.syncItemFromResource(
           event.resource,
           accessToken,
           account.id,
-          account.organizationId,
+          account.organization,
           account.meliUserId
         );
       } else if (topic.includes("questions") || resource.includes("/questions")) {
@@ -126,7 +121,7 @@ export class WebhookProcessorService {
           account.meliUserId,
           accessToken,
           account.id,
-          account.organizationId
+          account.organization
         );
       } else if (topic.includes("shipments") || resource.includes("/shipments")) {
         await this.syncShipmentFromResource(
@@ -173,45 +168,52 @@ export class WebhookProcessorService {
 
     if (!order || !order.id) return;
 
-    const localOrder = await prisma.order.upsert({
-      where: {
-        mercadoLivreAccountId_mlOrderId: {
-          mercadoLivreAccountId: accountId,
-          mlOrderId: order.id.toString(),
-        },
-      },
-      update: {
-        status: order.status,
-        totalAmount: order.total_amount,
-        buyerNickname: order.buyer?.nickname || "Desconhecido",
-        buyerId: order.buyer?.id?.toString() || "0",
-        dateClosed: order.date_closed ? new Date(order.date_closed) : null,
-      },
-      create: {
-        organizationId,
-        mercadoLivreAccountId: accountId,
-        mlOrderId: order.id.toString(),
-        status: order.status,
-        totalAmount: order.total_amount,
-        buyerNickname: order.buyer?.nickname || "Desconhecido",
-        buyerId: order.buyer?.id?.toString() || "0",
-        dateCreated: new Date(order.date_created),
-        dateClosed: order.date_closed ? new Date(order.date_closed) : null,
-      },
+    const orderData = {
+      organization: organizationId,
+      account: accountId,
+      mlOrderId: order.id.toString(),
+      status: order.status,
+      totalAmount: order.total_amount,
+      buyerNickname: order.buyer?.nickname || "Desconhecido",
+      dateCreated: order.date_created ? new Date(order.date_created).toISOString() : undefined,
+      currencyId: order.currency_id,
+      itemCount: order.order_items?.length || 0,
+    };
+
+    const existingOrders = await pbAdmin.collection('orders').getFullList({
+      filter: `account="${accountId}" && mlOrderId="${order.id}"`
     });
 
-    // Recria os order items
-    await prisma.orderItem.deleteMany({ where: { orderId: localOrder.id } });
-    if (order.order_items?.length) {
-      await prisma.orderItem.createMany({
-        data: order.order_items.map((item) => ({
-          orderId: localOrder.id,
-          mlItemId: item.item.id,
-          title: item.item.title,
-          quantity: item.quantity || 1,
-          unitPrice: item.unit_price,
-        })),
+    let localOrderId;
+    if (existingOrders.length > 0) {
+      localOrderId = existingOrders[0].id;
+      await pbAdmin.collection('orders').update(localOrderId, orderData);
+    } else {
+      const newOrder = await pbAdmin.collection('orders').create(orderData);
+      localOrderId = newOrder.id;
+    }
+
+    // Recria os order items se a coleção existir
+    try {
+      const existingItems = await pbAdmin.collection('order_items').getFullList({
+        filter: `order="${localOrderId}"`
       });
+      for (const item of existingItems) {
+        await pbAdmin.collection('order_items').delete(item.id);
+      }
+      if (order.order_items?.length) {
+        for (const item of order.order_items) {
+          await pbAdmin.collection('order_items').create({
+            order: localOrderId,
+            mlItemId: item.item.id,
+            title: item.item.title,
+            quantity: item.quantity || 1,
+            unitPrice: item.unit_price,
+          });
+        }
+      }
+    } catch (e) {
+      // Ignora se a coleção order_items não existir no PocketBase
     }
 
     // Sincroniza envio se presente
@@ -221,46 +223,31 @@ export class WebhookProcessorService {
           order.shipping.id.toString(),
           accessToken
         );
-        await prisma.shipment.upsert({
-          where: { orderId: localOrder.id },
-          update: {
-            mlShipmentId: shipment.id.toString(),
-            status: shipment.status,
-            trackingNumber: shipment.tracking_number,
-            trackingMethod: shipment.tracking_method,
-            serviceId: shipment.service_id,
-            dateFirstPrinted: shipment.date_first_printed
-              ? new Date(shipment.date_first_printed)
-              : null,
-            dateShipped: shipment.status_history?.date_shipped
-              ? new Date(shipment.status_history.date_shipped)
-              : null,
-            dateDelivered: shipment.status_history?.date_delivered
-              ? new Date(shipment.status_history.date_delivered)
-              : null,
-          },
-          create: {
-            orderId: localOrder.id,
-            mercadoLivreAccountId: accountId,
-            mlShipmentId: shipment.id.toString(),
-            status: shipment.status,
-            trackingNumber: shipment.tracking_number,
-            trackingMethod: shipment.tracking_method,
-            serviceId: shipment.service_id,
-            dateCreated: new Date(shipment.date_created),
-            dateFirstPrinted: shipment.date_first_printed
-              ? new Date(shipment.date_first_printed)
-              : null,
-            dateShipped: shipment.status_history?.date_shipped
-              ? new Date(shipment.status_history.date_shipped)
-              : null,
-            dateDelivered: shipment.status_history?.date_delivered
-              ? new Date(shipment.status_history.date_delivered)
-              : null,
-          },
+        const shipmentData = {
+          order: localOrderId,
+          account: accountId,
+          mlShipmentId: shipment.id.toString(),
+          status: shipment.status,
+          trackingNumber: shipment.tracking_number,
+          trackingMethod: shipment.tracking_method,
+          serviceId: shipment.service_id,
+          dateCreated: shipment.date_created ? new Date(shipment.date_created).toISOString() : undefined,
+          dateFirstPrinted: shipment.date_first_printed ? new Date(shipment.date_first_printed).toISOString() : null,
+          dateShipped: shipment.status_history?.date_shipped ? new Date(shipment.status_history.date_shipped).toISOString() : null,
+          dateDelivered: shipment.status_history?.date_delivered ? new Date(shipment.status_history.date_delivered).toISOString() : null,
+        };
+
+        const existingShipments = await pbAdmin.collection('shipments').getFullList({
+          filter: `order="${localOrderId}"`
         });
+
+        if (existingShipments.length > 0) {
+          await pbAdmin.collection('shipments').update(existingShipments[0].id, shipmentData);
+        } else {
+          await pbAdmin.collection('shipments').create(shipmentData);
+        }
       } catch {
-        // Erro de envio não bloqueia o pedido
+        // Erro de envio não bloqueia o pedido ou a coleção não existe
       }
     }
   }
@@ -282,37 +269,31 @@ export class WebhookProcessorService {
 
     if (!item || !item.id) return;
 
-    await prisma.listing.upsert({
-      where: {
-        mercadoLivreAccountId_mlItemId: {
-          mercadoLivreAccountId: accountId,
-          mlItemId: item.id,
-        },
-      },
-      update: {
-        title: item.title,
-        price: item.price,
-        currencyId: item.currency_id || "BRL",
-        availableQuantity: item.available_quantity || 0,
-        soldQuantity: item.sold_quantity || 0,
-        status: item.status,
-        permalink: item.permalink,
-        thumbnail: item.thumbnail,
-      },
-      create: {
-        organizationId,
-        mercadoLivreAccountId: accountId,
-        mlItemId: item.id,
-        title: item.title,
-        price: item.price,
-        currencyId: item.currency_id || "BRL",
-        availableQuantity: item.available_quantity || 0,
-        soldQuantity: item.sold_quantity || 0,
-        status: item.status,
-        permalink: item.permalink,
-        thumbnail: item.thumbnail,
-      },
+    const listingData = {
+      organization: organizationId,
+      account: accountId,
+      mlItemId: item.id,
+      title: item.title,
+      price: item.price,
+      availableQuantity: item.available_quantity || 0,
+      soldQuantity: item.sold_quantity || 0,
+      status: item.status,
+      permalink: item.permalink,
+      thumbnail: item.thumbnail,
+      condition: item.condition,
+      catalogProductId: item.catalog_product_id,
+      health: item.health,
+    };
+
+    const existingListings = await pbAdmin.collection('listings').getFullList({
+      filter: `account="${accountId}" && mlItemId="${item.id}"`
     });
+
+    if (existingListings.length > 0) {
+      await pbAdmin.collection('listings').update(existingListings[0].id, listingData);
+    } else {
+      await pbAdmin.collection('listings').create(listingData);
+    }
   }
 
   /**
@@ -330,32 +311,26 @@ export class WebhookProcessorService {
     );
 
     for (const q of questions) {
-      await prisma.question.upsert({
-        where: {
-          mercadoLivreAccountId_mlQuestionId: {
-            mercadoLivreAccountId: accountId,
-            mlQuestionId: q.id.toString(),
-          },
-        },
-        update: {
-          text: q.text,
-          status: q.status,
-          answerText: q.answer?.text || null,
-          answerDate: q.answer ? new Date(q.answer.date_created) : null,
-        },
-        create: {
-          organizationId,
-          mercadoLivreAccountId: accountId,
-          mlQuestionId: q.id.toString(),
-          mlItemId: q.item_id,
-          text: q.text,
-          status: q.status,
-          answerText: q.answer?.text || null,
-          answerDate: q.answer ? new Date(q.answer.date_created) : null,
-          buyerId: q.from?.id?.toString() || "0",
-          dateCreated: new Date(q.date_created),
-        },
+      const questionData = {
+        organization: organizationId,
+        account: accountId,
+        mlQuestionId: q.id.toString(),
+        itemId: q.item_id,
+        text: q.text,
+        status: q.status,
+        answer: q.answer?.text || null,
+        dateCreated: q.date_created ? new Date(q.date_created).toISOString() : undefined,
+      };
+
+      const existingQuestions = await pbAdmin.collection('questions').getFullList({
+        filter: `account="${accountId}" && mlQuestionId="${q.id}"`
       });
+
+      if (existingQuestions.length > 0) {
+        await pbAdmin.collection('questions').update(existingQuestions[0].id, questionData);
+      } else {
+        await pbAdmin.collection('questions').create(questionData);
+      }
     }
   }
 
@@ -376,56 +351,50 @@ export class WebhookProcessorService {
     );
     if (!shipment || !shipment.id) return;
 
-    // Tenta encontrar o pedido vinculado para upsert do envio
-    const existingShipment = await prisma.shipment.findFirst({
-      where: { mlShipmentId: shipment.id.toString() },
-    });
+    try {
+      // Tenta encontrar o envio existente para atualizar
+      const existingShipments = await pbAdmin.collection('shipments').getFullList({
+        filter: `mlShipmentId="${shipment.id}"`
+      });
 
-    if (!existingShipment) return; // Sem pedido vinculado, ignora
+      if (existingShipments.length === 0) return; // Sem pedido vinculado no momento, ignora
 
-    await prisma.shipment.update({
-      where: { id: existingShipment.id },
-      data: {
+      const shipmentData = {
         status: shipment.status,
         trackingNumber: shipment.tracking_number,
         trackingMethod: shipment.tracking_method,
-        dateFirstPrinted: shipment.date_first_printed
-          ? new Date(shipment.date_first_printed)
-          : null,
-        dateShipped: shipment.status_history?.date_shipped
-          ? new Date(shipment.status_history.date_shipped)
-          : null,
-        dateDelivered: shipment.status_history?.date_delivered
-          ? new Date(shipment.status_history.date_delivered)
-          : null,
-      },
-    });
+        dateFirstPrinted: shipment.date_first_printed ? new Date(shipment.date_first_printed).toISOString() : null,
+        dateShipped: shipment.status_history?.date_shipped ? new Date(shipment.status_history.date_shipped).toISOString() : null,
+        dateDelivered: shipment.status_history?.date_delivered ? new Date(shipment.status_history.date_delivered).toISOString() : null,
+      };
+
+      await pbAdmin.collection('shipments').update(existingShipments[0].id, shipmentData);
+    } catch (e) {
+      // Ignora se a coleção shipments não existir
+    }
   }
 
   // ─── Helpers de status ────────────────────────────────────────────────────
 
   private static async markProcessed(id: string): Promise<void> {
-    await prisma.webhookEvent.update({
-      where: { id },
-      data: { status: "processed", processedAt: new Date() },
-    });
+    try {
+      await pbAdmin.collection('webhook_events').update(id, { status: "processed" });
+    } catch (e) {}
   }
 
   private static async markIgnored(id: string, reason: string): Promise<void> {
-    await prisma.webhookEvent.update({
-      where: { id },
-      data: {
+    try {
+      await pbAdmin.collection('webhook_events').update(id, {
         status: "ignored",
-        processedAt: new Date(),
-        errorMessage: reason,
-      },
-    });
+      });
+      console.log(`[WebhookProcessor] Evento ${id} ignorado: ${reason}`);
+    } catch (e) {}
   }
 
   private static async markError(id: string, message: string): Promise<void> {
-    await prisma.webhookEvent.update({
-      where: { id },
-      data: { status: "error", errorMessage: message },
-    });
+    try {
+      await pbAdmin.collection('webhook_events').update(id, { status: "error" });
+      console.error(`[WebhookProcessor] Evento ${id} erro: ${message}`);
+    } catch (e) {}
   }
 }

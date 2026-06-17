@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
-import { prisma } from "@/lib/prisma";
+import { pbAdmin } from "@/lib/pb";
 import { verifyToken } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
@@ -32,7 +32,6 @@ function parseLocalDate(value: string | null) {
   return new Date(year, month - 1, day);
 }
 
-// GET /api/dashboard/metrics?accountId=all|{uuid}
 export async function GET(request: Request) {
   try {
     const cookieStore = await cookies();
@@ -54,41 +53,16 @@ export async function GET(request: Request) {
 
     const orgId = payload.orgId;
 
-    // Monta o filtro base dependendo se é "all" ou uma conta específica
-    let accountFilter: { organizationId: string; mercadoLivreAccountId?: string } = {
-      organizationId: orgId,
-    };
-    let listingAccountFilter: { organizationId: string; mercadoLivreAccountId?: string } = {
-      organizationId: orgId,
-    };
-    let promotionFilter: { organizationId: string } = { organizationId: orgId };
-
     if (accountId !== "all") {
-      // Valida que a conta pertence à organização
-      const account = await prisma.mercadoLivreAccount.findFirst({
-        where: { id: accountId, organizationId: orgId },
-      });
-      if (!account) {
+      const account = await pbAdmin.collection("mercado_livre_accounts").getOne(accountId).catch(() => null);
+      if (!account || account.organization !== orgId) {
         return NextResponse.json(
           { error: "Conta não encontrada ou acesso negado." },
           { status: 403 }
         );
       }
-      accountFilter.mercadoLivreAccountId = accountId;
-      listingAccountFilter.mercadoLivreAccountId = accountId;
     }
 
-    const shipmentAccountIds =
-      accountId !== "all"
-        ? [accountId]
-        : (
-            await prisma.mercadoLivreAccount.findMany({
-              where: { organizationId: orgId },
-              select: { id: true },
-            })
-          ).map((account) => account.id);
-
-    // Define o início do dia de hoje (UTC-3 Brasil)
     const today = startOfDay(new Date());
     const rangeEnd = period === "custom" && customDate ? endOfDay(customDate) : endOfDay(today);
     const rangeStart =
@@ -97,148 +71,102 @@ export async function GET(request: Request) {
         : startOfDay(new Date(today.getTime() - ((PERIOD_DAYS[period] ?? 30) - 1) * 24 * 60 * 60 * 1000));
     const rangeDays =
       Math.floor((startOfDay(rangeEnd).getTime() - rangeStart.getTime()) / (24 * 60 * 60 * 1000)) + 1;
-    const dateRange = { gte: rangeStart, lte: rangeEnd };
 
-    // -------------------------------------------------------------------------
-    // 1. MÉTRICAS DE CARDS — Execução em paralelo para performance máxima
-    // -------------------------------------------------------------------------
+    const baseParams = { orgId, acc: accountId };
+    const accFilter = accountId !== "all" ? " && account = {:acc}" : "";
+
+    const activeListingsP = pbAdmin.collection("listings").getList(1, 1, { filter: pbAdmin.filter(`organization = {:orgId} && status = 'active'` + accFilter, baseParams) }).catch(() => ({ totalItems: 0 }));
+    const pausedListingsP = pbAdmin.collection("listings").getList(1, 1, { filter: pbAdmin.filter(`organization = {:orgId} && status = 'paused'` + accFilter, baseParams) }).catch(() => ({ totalItems: 0 }));
+    const pendingQuestionsP = pbAdmin.collection("questions").getList(1, 1, { filter: pbAdmin.filter(`organization = {:orgId} && status = 'unanswered'` + accFilter, baseParams) }).catch(() => ({ totalItems: 0 }));
+    const activeClaimsP = pbAdmin.collection("claims").getList(1, 1, { filter: pbAdmin.filter(`organization = {:orgId} && stage != 'closed'` + accFilter, baseParams) }).catch(() => ({ totalItems: 0 }));
+    
+    const twoDaysAgo = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString().replace("T", " ");
+    const lateShipmentsP = pbAdmin.collection("shipments").getList(1, 1, { 
+      filter: pbAdmin.filter(`organization = {:orgId} && (status = 'ready_to_ship' || status = 'handling') && created < {:twoDaysAgo}` + accFilter, { ...baseParams, twoDaysAgo }) 
+    }).catch(() => ({ totalItems: 0 }));
+
+    const activePromotionsP = pbAdmin.collection("promotions").getList(1, 1, { filter: pbAdmin.filter(`organization = {:orgId} && status = 'active'`, baseParams) }).catch(() => ({ totalItems: 0 }));
+    const activeCampaignsP = pbAdmin.collection("advertising_campaigns").getList(1, 1, { filter: pbAdmin.filter(`organization = {:orgId} && status = 'active'`, baseParams) }).catch(() => ({ totalItems: 0 }));
+
+    const latestReputationP = pbAdmin.collection("seller_reputations").getList(1, 1, { 
+      filter: pbAdmin.filter(`organization = {:orgId}` + accFilter, baseParams),
+      sort: "-created"
+    }).catch(() => ({ items: [] }));
+
+    const allListingsP = pbAdmin.collection("listings").getFullList({ filter: pbAdmin.filter(`organization = {:orgId}` + accFilter, baseParams), fields: "status" }).catch(() => []);
+    const allPromotionsP = pbAdmin.collection("promotions").getFullList({ filter: pbAdmin.filter(`organization = {:orgId}`, baseParams), fields: "status" }).catch(() => []);
+    const accountsP = accountId === "all" ? pbAdmin.collection("mercado_livre_accounts").getFullList({ filter: pbAdmin.filter(`organization = {:orgId}`, baseParams) }).catch(() => []) : Promise.resolve([]);
+
+    const ordersP = pbAdmin.collection("orders").getFullList({
+      filter: pbAdmin.filter(`organization = {:orgId} && dateCreated >= {:start} && dateCreated <= {:end}` + accFilter, {
+        ...baseParams,
+        start: rangeStart.toISOString().replace("T", " "),
+        end: rangeEnd.toISOString().replace("T", " "),
+      })
+    }).catch(() => []);
+
     const [
-      salesToday,
-      revenueTodayAgg,
-      avgTicketAgg,
-      ordersTotal,
-      activeListings,
-      pausedListings,
-      pendingQuestions,
-      activeClaims,
-      cancelledOrders,
-      lateShipments,
-      activePromotions,
-      activeCampaigns,
-      latestReputation,
+      activeListingsRes,
+      pausedListingsRes,
+      pendingQuestionsRes,
+      activeClaimsRes,
+      lateShipmentsRes,
+      activePromotionsRes,
+      activeCampaignsRes,
+      latestReputationRes,
+      allListings,
+      allPromotions,
+      accountsList,
+      orders
     ] = await Promise.all([
-      // Vendas hoje (COUNT)
-      prisma.order.count({
-        where: {
-          ...accountFilter,
-          dateCreated: dateRange,
-          NOT: { status: "cancelled" },
-        },
-      }),
-
-      // Faturamento hoje (SUM totalAmount)
-      prisma.order.aggregate({
-        where: {
-          ...accountFilter,
-          dateCreated: dateRange,
-          NOT: { status: "cancelled" },
-        },
-        _sum: { totalAmount: true },
-      }),
-
-      // Ticket médio (AVG totalAmount — últimos 30 dias excluindo cancelados)
-      prisma.order.aggregate({
-        where: {
-          ...accountFilter,
-          dateCreated: dateRange,
-          NOT: { status: "cancelled" },
-        },
-        _avg: { totalAmount: true },
-      }),
-
-      // Total de pedidos (todos os status)
-      prisma.order.count({ where: { ...accountFilter, dateCreated: dateRange } }),
-
-      // Anúncios ativos
-      prisma.listing.count({
-        where: { ...listingAccountFilter, status: "active" },
-      }),
-
-      // Anúncios pausados
-      prisma.listing.count({
-        where: { ...listingAccountFilter, status: "paused" },
-      }),
-
-      // Perguntas pendentes (sem resposta)
-      prisma.question.count({
-        where: { ...accountFilter, status: "unanswered" },
-      }),
-
-      // Reclamações abertas (não fechadas)
-      prisma.claim.count({
-        where: { ...accountFilter, NOT: { stage: "closed" } },
-      }),
-
-      // Cancelamentos
-      prisma.order.count({
-        where: { ...accountFilter, status: "cancelled", dateCreated: dateRange },
-      }),
-
-      // Envios com atraso (ready_to_ship ou handling com mais de 2 dias sem movimento)
-      prisma.shipment.count({
-        where: {
-          mercadoLivreAccountId: { in: shipmentAccountIds },
-          status: { in: ["ready_to_ship", "handling"] },
-          dateCreated: {
-            lt: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000),
-          },
-        },
-      }),
-
-      // Promoções ativas
-      prisma.promotion.count({
-        where: { ...promotionFilter, status: "active" },
-      }),
-
-      // Campanhas Ads ativas
-      prisma.advertisingCampaign.count({
-        where: { organizationId: orgId, status: "active" },
-      }),
-
-      // Última reputação registrada
-      accountId !== "all"
-        ? prisma.sellerReputation.findFirst({
-            where: { mercadoLivreAccountId: accountId },
-            orderBy: { createdAt: "desc" },
-          })
-        : prisma.sellerReputation.findFirst({
-            where: { organizationId: orgId },
-            orderBy: { createdAt: "desc" },
-          }),
+      activeListingsP,
+      pausedListingsP,
+      pendingQuestionsP,
+      activeClaimsP,
+      lateShipmentsP,
+      activePromotionsP,
+      activeCampaignsP,
+      latestReputationP,
+      allListingsP,
+      allPromotionsP,
+      accountsP,
+      ordersP
     ]);
 
-    // -------------------------------------------------------------------------
-    // 2. DADOS PARA GRÁFICOS
-    // -------------------------------------------------------------------------
+    let salesToday = 0;
+    let revenueToday = 0;
+    let cancelledOrders = 0;
+    const ordersTotal = orders.length;
 
-    // Faturamento por dia (últimos 30 dias)
-    const ordersForCharts = await prisma.order.findMany({
-      where: {
-        ...accountFilter,
-        dateCreated: dateRange,
-        NOT: { status: "cancelled" },
-      },
-      select: {
-        dateCreated: true,
-        totalAmount: true,
-        status: true,
-        mercadoLivreAccountId: true,
-      },
-      orderBy: { dateCreated: "asc" },
-    });
-
-    // Agrupa pedidos por dia para faturamento e contagem de vendas
     const revenueByDayMap: Record<string, number> = {};
     const salesByDayMap: Record<string, number> = {};
+    const accountStats: Record<string, { revenue: number; orders: number }> = {};
 
-    for (const order of ordersForCharts) {
-      const dayKey = order.dateCreated.toISOString().slice(0, 10);
+    for (const order of orders) {
+      if (order.status === "cancelled") {
+        cancelledOrders++;
+        continue;
+      }
+      salesToday++;
       const amount = Number(order.totalAmount) || 0;
-      revenueByDayMap[dayKey] = (revenueByDayMap[dayKey] || 0) + amount;
-      salesByDayMap[dayKey] = (salesByDayMap[dayKey] || 0) + 1;
+      revenueToday += amount;
+
+      const dateStr = order.dateCreated ? new Date(order.dateCreated).toISOString().slice(0, 10) : "";
+      if (dateStr) {
+        revenueByDayMap[dateStr] = (revenueByDayMap[dateStr] || 0) + amount;
+        salesByDayMap[dateStr] = (salesByDayMap[dateStr] || 0) + 1;
+      }
+
+      const accId = order.account;
+      if (accId) {
+        if (!accountStats[accId]) accountStats[accId] = { revenue: 0, orders: 0 };
+        accountStats[accId].revenue += amount;
+        accountStats[accId].orders++;
+      }
     }
 
-    // Garante todos os 30 dias no array (zero nos dias sem pedidos)
+    const avgTicket = salesToday > 0 ? revenueToday / salesToday : 0;
+
     const revenueByDay: Array<{ date: string; revenue: number }> = [];
     const salesByDay: Array<{ date: string; count: number }> = [];
 
@@ -250,85 +178,55 @@ export async function GET(request: Request) {
       salesByDay.push({ date: key, count: salesByDayMap[key] || 0 });
     }
 
-    // Anúncios por status
-    const listingStatusGroups = await prisma.listing.groupBy({
-      by: ["status"],
-      where: listingAccountFilter,
-      _count: { id: true },
-    });
-    const listingsByStatus = listingStatusGroups.map((g) => ({
-      status: g.status,
-      count: g._count.id,
-    }));
+    const listingStatusMap: Record<string, number> = {};
+    for (const l of allListings) {
+      listingStatusMap[l.status] = (listingStatusMap[l.status] || 0) + 1;
+    }
+    const listingsByStatus = Object.entries(listingStatusMap).map(([status, count]) => ({ status, count }));
 
-    // Performance por conta (apenas no modo "todas as contas")
-    let performanceByAccount: Array<{
-      nickname: string;
-      revenue: number;
-      orders: number;
-    }> = [];
+    const promotionStatusMap: Record<string, number> = {};
+    for (const p of allPromotions) {
+      promotionStatusMap[p.status] = (promotionStatusMap[p.status] || 0) + 1;
+    }
+    const promotionsByStatus = Object.entries(promotionStatusMap).map(([status, count]) => ({ status, count }));
 
+    let performanceByAccount: Array<{ nickname: string; revenue: number; orders: number }> = [];
     if (accountId === "all") {
-      const accounts = await prisma.mercadoLivreAccount.findMany({
-        where: { organizationId: orgId },
-        select: { id: true, nickname: true },
-      });
-
-      for (const acc of accounts) {
-        const accOrders = await prisma.order.aggregate({
-          where: {
-            mercadoLivreAccountId: acc.id,
-            dateCreated: dateRange,
-            NOT: { status: "cancelled" },
-          },
-          _sum: { totalAmount: true },
-          _count: { id: true },
-        });
+      for (const acc of accountsList) {
+        const stats = accountStats[acc.id] || { revenue: 0, orders: 0 };
         performanceByAccount.push({
-          nickname: acc.nickname,
-          revenue: Number(accOrders._sum.totalAmount) || 0,
-          orders: accOrders._count.id,
+          nickname: acc.nickname || acc.meliUserId || acc.id,
+          revenue: stats.revenue,
+          orders: stats.orders,
         });
       }
     }
 
-    // Promoções por status
-    const promotionStatusGroups = await prisma.promotion.groupBy({
-      by: ["status"],
-      where: promotionFilter,
-      _count: { id: true },
-    });
-    const promotionsByStatus = promotionStatusGroups.map((g) => ({
-      status: g.status,
-      count: g._count.id,
-    }));
+    const latestReputation = latestReputationRes.items[0];
 
-    // -------------------------------------------------------------------------
-    // 3. MONTA RESPOSTA FINAL
-    // -------------------------------------------------------------------------
     return NextResponse.json({
       success: true,
       cards: {
         salesToday,
-        revenueToday: Number(revenueTodayAgg._sum.totalAmount) || 0,
-        avgTicket: Number(avgTicketAgg._avg.totalAmount) || 0,
+        revenueToday,
+        avgTicket,
         ordersTotal,
-        activeListings,
-        pausedListings,
-        pendingQuestions,
-        activeClaims,
+        activeListings: activeListingsRes.totalItems,
+        pausedListings: pausedListingsRes.totalItems,
+        pendingQuestions: pendingQuestionsRes.totalItems,
+        activeClaims: activeClaimsRes.totalItems,
         cancelledOrders,
-        lateShipments,
-        activePromotions,
-        activeCampaigns,
+        lateShipments: lateShipmentsRes.totalItems,
+        activePromotions: activePromotionsRes.totalItems,
+        activeCampaigns: activeCampaignsRes.totalItems,
         reputation: latestReputation
           ? {
               levelId: latestReputation.levelId,
               powerSellerStatus: latestReputation.powerSellerStatus,
-              claimsRate: Number(latestReputation.claimsRate),
-              cancellationsRate: Number(latestReputation.cancellationsRate),
-              delayedHandlingTimeRate: Number(latestReputation.delayedHandlingTimeRate),
-              salesCompleted: latestReputation.salesCompleted,
+              claimsRate: Number(latestReputation.claimsRate) || 0,
+              cancellationsRate: Number(latestReputation.cancellationsRate) || 0,
+              delayedHandlingTimeRate: Number(latestReputation.delayedHandlingTimeRate) || 0,
+              salesCompleted: latestReputation.metricsSalesCompleted || latestReputation.salesCompleted || 0,
             }
           : null,
       },

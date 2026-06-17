@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
-import { prisma } from "@/lib/prisma";
+import { pbAdmin } from "@/lib/pb";
 import { verifyToken } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
@@ -18,32 +18,37 @@ export async function GET(request: Request) {
     const { searchParams } = new URL(request.url);
     const accountId = searchParams.get("accountId") || "all";
     const statusFilter = searchParams.get("status") || undefined;
+    const page = 1;
+    const limit = 100;
 
-    let where: Record<string, unknown> = { organizationId: payload.orgId };
+    let filter = `organization="${payload.orgId}"`;
 
     if (accountId !== "all") {
-      const account = await prisma.mercadoLivreAccount.findFirst({
-        where: { id: accountId, organizationId: payload.orgId },
-      });
-      if (!account) return NextResponse.json({ error: "Conta não encontrada." }, { status: 403 });
-      where.mercadoLivreAccountId = accountId;
+      try {
+        const account = await pbAdmin.collection("mercado_livre_accounts").getFirstListItem(`id="${accountId}" && organization="${payload.orgId}"`);
+        if (!account) throw new Error("Not found");
+        filter += ` && account="${accountId}"`;
+      } catch (e) {
+        return NextResponse.json({ error: "Conta não encontrada." }, { status: 403 });
+      }
     }
 
-    if (statusFilter) where.status = statusFilter;
+    if (statusFilter) {
+      filter += ` && status="${statusFilter}"`;
+    }
 
-    const [questions, total] = await Promise.all([
-      prisma.question.findMany({
-        where,
-        orderBy: { dateCreated: "desc" },
-        take: 100,
-        include: {
-          mercadoLivreAccount: { select: { nickname: true } },
-        },
-      }),
-      prisma.question.count({ where }),
-    ]);
+    const result = await pbAdmin.collection("questions").getList(page, limit, {
+      filter,
+      sort: "-dateCreated",
+      expand: "account"
+    });
 
-    return NextResponse.json({ success: true, questions, total });
+    const questions = result.items.map(item => ({
+      ...item,
+      mercadoLivreAccount: item.expand?.account ? { nickname: item.expand.account.nickname } : null
+    }));
+
+    return NextResponse.json({ success: true, questions: questions, total: result.totalItems });
   } catch (err: any) {
     console.error("GET /api/questions error:", err);
     return NextResponse.json({ error: "Erro interno." }, { status: 500 });

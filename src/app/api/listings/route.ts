@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
-import { prisma } from "@/lib/prisma";
+import { pbAdmin } from "@/lib/pb";
 import { verifyToken } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
@@ -19,43 +19,41 @@ export async function GET(request: Request) {
     const accountId = searchParams.get("accountId") || "all";
     const page = Math.max(1, parseInt(searchParams.get("page") || "1"));
     const limit = Math.min(100, parseInt(searchParams.get("limit") || "50"));
-    const skip = (page - 1) * limit;
 
-    let where: Record<string, unknown> = { organizationId: payload.orgId };
+    let filter = `organization="${payload.orgId}"`;
 
     if (accountId !== "all") {
-      const account = await prisma.mercadoLivreAccount.findFirst({
-        where: { id: accountId, organizationId: payload.orgId },
-      });
-      if (!account) return NextResponse.json({ error: "Conta não encontrada." }, { status: 403 });
-      where.mercadoLivreAccountId = accountId;
+      try {
+        const account = await pbAdmin.collection("mercado_livre_accounts").getFirstListItem(`id="${accountId}" && organization="${payload.orgId}"`);
+        if (!account) throw new Error("Not found");
+        filter += ` && account="${accountId}"`;
+      } catch (e) {
+        return NextResponse.json({ error: "Conta não encontrada." }, { status: 403 });
+      }
     }
 
-    const [listings, total] = await Promise.all([
-      prisma.listing.findMany({
-        where,
-        orderBy: { id: "desc" },
-        skip,
-        take: limit,
-        select: {
-          id: true,
-          mlItemId: true,
-          title: true,
-          price: true,
-          currencyId: true,
-          availableQuantity: true,
-          soldQuantity: true,
-          status: true,
-          permalink: true,
-          thumbnail: true,
-          mercadoLivreAccountId: true,
-          mercadoLivreAccount: { select: { nickname: true } },
-        },
-      }),
-      prisma.listing.count({ where }),
-    ]);
+    const result = await pbAdmin.collection("listings").getList(page, limit, {
+      filter,
+      sort: "-created",
+      expand: "account"
+    });
 
-    return NextResponse.json({ success: true, listings, total });
+    const listings = result.items.map((item: any) => ({
+      id: item.id,
+      mlItemId: item.mlItemId,
+      title: item.title,
+      price: item.price,
+      currencyId: item.currencyId || "BRL",
+      availableQuantity: item.availableQuantity,
+      soldQuantity: item.soldQuantity,
+      status: item.status,
+      permalink: item.permalink,
+      thumbnail: item.thumbnail,
+      mercadoLivreAccountId: item.account,
+      mercadoLivreAccount: item.expand?.account ? { nickname: item.expand.account.nickname } : null,
+    }));
+
+    return NextResponse.json({ success: true, listings, total: result.totalItems });
   } catch (err: any) {
     console.error("GET /api/listings error:", err);
     return NextResponse.json({ error: "Erro interno." }, { status: 500 });

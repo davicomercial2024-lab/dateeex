@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server";
-import bcrypt from "bcryptjs";
-import { prisma } from "@/lib/prisma";
+import { getPb, pbAdmin } from "@/lib/pb";
 import { createToken } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
@@ -19,38 +18,32 @@ export async function POST(request: Request) {
 
     const normalizedEmail = email.toLowerCase().trim();
 
-    // Busca o usuário incluindo suas organizações vinculadas
-    const user = await prisma.user.findUnique({
-      where: { email: normalizedEmail },
-      include: {
-        memberships: {
-          include: {
-            organization: true,
-          },
-        },
-      },
-    });
-
-    if (!user) {
-      // Mensagem genérica por questões de segurança
+    // Instancia um PB limpo para testar o login
+    const pb = getPb();
+    let authData;
+    try {
+      authData = await pb.collection("users").authWithPassword(normalizedEmail, password);
+    } catch (e) {
       return NextResponse.json(
         { error: "Credenciais inválidas. Verifique seu e-mail e senha." },
         { status: 401 }
       );
     }
 
-    // Compara o hash da senha
-    const isPasswordValid = await bcrypt.compare(password, user.passwordHash);
+    const user = authData.record;
 
-    if (!isPasswordValid) {
-      return NextResponse.json(
-        { error: "Credenciais inválidas. Verifique seu e-mail e senha." },
-        { status: 401 }
-      );
-    }
+    // Autentica admin para buscar relacionamentos seguros (organization_members)
+    await pbAdmin.admins.authWithPassword(process.env.PB_ADMIN_EMAIL || 'bbbaterias@bbdi.com.br', process.env.PB_ADMIN_PASS || 'diev1pn4753ikpf');
 
-    // Obtém a organização ativa (a primeira onde ele é membro)
-    const activeMembership = user.memberships[0];
+    // Obtém a organização ativa do usuário
+    let activeMembership;
+    try {
+      const memberships = await pbAdmin.collection("organization_members").getFullList({
+        filter: `user="${user.id}"`,
+        expand: "organization",
+      });
+      activeMembership = memberships[0];
+    } catch (e) {}
 
     if (!activeMembership) {
       return NextResponse.json(
@@ -62,15 +55,14 @@ export async function POST(request: Request) {
     // Cria o token de sessão JWT
     const token = await createToken({
       userId: user.id,
-      orgId: activeMembership.organizationId,
+      orgId: activeMembership.organization,
     });
 
-    // Injeta o cookie seguro HTTP-only na resposta
     const response = NextResponse.json(
       {
         success: true,
         user: { name: user.name, email: user.email },
-        organization: activeMembership.organization.name,
+        organization: activeMembership.expand?.organization?.name || "Organização",
       },
       { status: 200 }
     );
@@ -87,7 +79,7 @@ export async function POST(request: Request) {
 
     return response;
   } catch (error: any) {
-    console.error("Login Error:", error);
+    console.error("Login Error:", error?.response || error);
     return NextResponse.json(
       { error: "Falha interna ao processar login." },
       { status: 500 }

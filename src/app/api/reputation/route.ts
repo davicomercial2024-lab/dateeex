@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
-import { prisma } from "@/lib/prisma";
+import { pbAdmin } from "@/lib/pb";
 import { verifyToken } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
@@ -19,19 +19,20 @@ export async function GET(request: Request) {
     const accountId = searchParams.get("accountId") || "all";
 
     if (accountId === "all") {
-      // Retorna última reputação por conta
-      const accounts = await prisma.mercadoLivreAccount.findMany({
-        where: { organizationId: payload.orgId },
-        select: { id: true, nickname: true, meliUserId: true },
+      const accounts = await pbAdmin.collection("mercado_livre_accounts").getFullList({
+        filter: `organization="${payload.orgId}"`,
       });
 
       const reputations = await Promise.all(
         accounts.map(async (acc) => {
-          const rep = await prisma.sellerReputation.findFirst({
-            where: { mercadoLivreAccountId: acc.id },
-            orderBy: { createdAt: "desc" },
-          });
-          return rep ? { ...rep, account: { nickname: acc.nickname, meliUserId: acc.meliUserId } } : null;
+          try {
+            const rep = await pbAdmin.collection("seller_reputations").getFirstListItem(`account="${acc.id}"`, {
+              sort: "-created"
+            });
+            return { ...rep, account: { nickname: acc.nickname, meliUserId: acc.meliUserId } };
+          } catch (e) {
+            return null;
+          }
         })
       );
 
@@ -41,16 +42,21 @@ export async function GET(request: Request) {
         single: null,
       });
     } else {
-      const account = await prisma.mercadoLivreAccount.findFirst({
-        where: { id: accountId, organizationId: payload.orgId },
-        select: { id: true, nickname: true, meliUserId: true },
-      });
-      if (!account) return NextResponse.json({ error: "Conta não encontrada." }, { status: 403 });
+      let account;
+      try {
+        account = await pbAdmin.collection("mercado_livre_accounts").getFirstListItem(`id="${accountId}" && organization="${payload.orgId}"`);
+      } catch (e) {
+        return NextResponse.json({ error: "Conta não encontrada." }, { status: 403 });
+      }
 
-      const rep = await prisma.sellerReputation.findFirst({
-        where: { mercadoLivreAccountId: accountId },
-        orderBy: { createdAt: "desc" },
-      });
+      let rep = null;
+      try {
+        rep = await pbAdmin.collection("seller_reputations").getFirstListItem(`account="${accountId}"`, {
+          sort: "-created"
+        });
+      } catch (e) {
+        // Not found
+      }
 
       return NextResponse.json({
         success: true,

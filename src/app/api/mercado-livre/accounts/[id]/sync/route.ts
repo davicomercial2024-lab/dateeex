@@ -1,6 +1,6 @@
 import { after, NextResponse } from "next/server";
 import { cookies } from "next/headers";
-import { prisma } from "@/lib/prisma";
+import { pbAdmin } from "@/lib/pb";
 import { verifyToken } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
@@ -8,11 +8,6 @@ export const revalidate = 0;
 
 type RouteParams = { params: Promise<{ id: string }> };
 
-/**
- * POST /api/mercado-livre/accounts/[id]/sync
- * Dispara sincronização pontual de uma conta específica.
- * Retorna 202 imediatamente — a sync ocorre no ciclo after() do Next.
- */
 export async function POST(_request: Request, { params }: RouteParams) {
   try {
     const cookieStore = await cookies();
@@ -24,24 +19,29 @@ export async function POST(_request: Request, { params }: RouteParams) {
 
     const { id } = await params;
 
-    const account = await prisma.mercadoLivreAccount.findFirst({
-      where: { id, organizationId: payload.orgId, isActive: true },
-      include: { token: true },
-    });
+    const account = await pbAdmin.collection("mercado_livre_accounts").getOne(id).catch(() => null);
 
-    if (!account) return NextResponse.json({ error: "Conta não encontrada ou inativa." }, { status: 404 });
-    if (!account.token) return NextResponse.json({ error: "Conta sem token OAuth. Reconecte via OAuth." }, { status: 400 });
-    if (account.token.expiresAt < new Date() && account.token.accessToken === account.token.refreshToken) {
+    if (!account || account.organization !== payload.orgId || !account.isActive) {
+      return NextResponse.json({ error: "Conta não encontrada ou inativa." }, { status: 404 });
+    }
+
+    const tokens = await pbAdmin.collection("oauth_tokens").getFullList({
+      filter: pbAdmin.filter("account = {:id}", { id: account.id }),
+    });
+    const token = tokens[0] || null;
+
+    if (!token) return NextResponse.json({ error: "Conta sem token OAuth. Reconecte via OAuth." }, { status: 400 });
+    
+    if (new Date(token.expiresAt) < new Date() && token.accessToken === token.refreshToken) {
       return NextResponse.json({ error: "Token expirado. Reconecte a conta via OAuth." }, { status: 400 });
     }
+    
     if (account.lastSyncStatus === "SYNCING") {
       return NextResponse.json({ success: true, message: "Sincronização já está em andamento." }, { status: 200 });
     }
 
-    // Marca como SYNCING
-    await prisma.mercadoLivreAccount.update({
-      where: { id },
-      data: { lastSyncStatus: "SYNCING", lastSyncProgress: 0, lastSyncError: null },
+    await pbAdmin.collection("mercado_livre_accounts").update(id, {
+      lastSyncStatus: "SYNCING", lastSyncProgress: 0, lastSyncError: null
     });
 
     after(async () => {
@@ -53,26 +53,21 @@ export async function POST(_request: Request, { params }: RouteParams) {
           payload.userId,
           undefined,
           async (progress) => {
-            await prisma.mercadoLivreAccount.update({
-              where: { id },
-              data: { lastSyncProgress: progress },
+            await pbAdmin.collection("mercado_livre_accounts").update(id, {
+              lastSyncProgress: progress
             });
           }
         );
-        await prisma.mercadoLivreAccount.update({
-          where: { id },
-          data: {
-            lastSyncAt: new Date(),
-            lastSyncStatus: report.errors.length === 0 ? "SUCCESS" : "PARTIAL",
-            lastSyncProgress: 100,
-            lastSyncError: report.errors.length > 0 ? report.errors.join("; ") : null,
-          },
+        await pbAdmin.collection("mercado_livre_accounts").update(id, {
+          lastSyncAt: new Date().toISOString(),
+          lastSyncStatus: report.errors.length === 0 ? "SUCCESS" : "PARTIAL",
+          lastSyncProgress: 100,
+          lastSyncError: report.errors.length > 0 ? report.errors.join("; ") : null,
         });
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err);
-        await prisma.mercadoLivreAccount.update({
-          where: { id },
-          data: { lastSyncStatus: "FAILED", lastSyncError: msg, lastSyncAt: new Date(), lastSyncProgress: 100 },
+        await pbAdmin.collection("mercado_livre_accounts").update(id, {
+          lastSyncStatus: "FAILED", lastSyncError: msg, lastSyncAt: new Date().toISOString(), lastSyncProgress: 100
         });
       }
     });

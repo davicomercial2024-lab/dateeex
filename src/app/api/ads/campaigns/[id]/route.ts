@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { verifyToken } from "@/lib/auth";
-import { prisma } from "@/lib/prisma";
+import { pbAdmin } from "@/lib/pb";
 import { MercadoLivreApiService } from "@/services/mercado-livre-api.service";
 
 type RouteParams = { params: Promise<{ id: string }> };
@@ -28,10 +28,25 @@ export async function PATCH(request: Request, { params }: RouteParams) {
     }
 
     // Valida se a conta pertence à organização e obtém o token
-    const account = await prisma.mercadoLivreAccount.findFirst({
-      where: { id: accountId, organizationId: session.orgId },
-      include: { token: true },
-    });
+    let pbAccount;
+    try {
+      pbAccount = await pbAdmin.collection("mercado_livre_accounts").getFirstListItem(
+        `id = "${accountId}" && organization = "${session.orgId}"`
+      );
+    } catch (err) {
+      // Not found
+    }
+
+    let accountToken = null;
+    if (pbAccount) {
+      try {
+        accountToken = await pbAdmin.collection("oauth_tokens").getFirstListItem(`account = "${pbAccount.id}"`);
+      } catch (err) {
+        // No token
+      }
+    }
+
+    const account = pbAccount ? { ...pbAccount, token: accountToken } : null;
 
     if (!account || !account.token) {
       return NextResponse.json({ error: "Conta não encontrada ou sem token" }, { status: 404 });

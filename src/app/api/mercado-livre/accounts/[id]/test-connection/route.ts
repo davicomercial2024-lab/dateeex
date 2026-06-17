@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
-import { prisma } from "@/lib/prisma";
+import { pbAdmin } from "@/lib/pb";
 import { verifyToken } from "@/lib/auth";
 import { MercadoLivreApiService } from "@/services/mercado-livre-api.service";
 
@@ -9,11 +9,6 @@ export const revalidate = 0;
 
 type RouteParams = { params: Promise<{ id: string }> };
 
-/**
- * POST /api/mercado-livre/accounts/[id]/test-connection
- * Testa a conexão com a API do Mercado Livre usando o token salvo.
- * Compara o meliUserId retornado com o salvo no banco.
- */
 export async function POST(_request: Request, { params }: RouteParams) {
   try {
     const cookieStore = await cookies();
@@ -25,14 +20,18 @@ export async function POST(_request: Request, { params }: RouteParams) {
 
     const { id } = await params;
 
-    const account = await prisma.mercadoLivreAccount.findFirst({
-      where: { id, organizationId: payload.orgId },
-      include: { token: true },
+    const account = await pbAdmin.collection("mercado_livre_accounts").getOne(id).catch(() => null);
+
+    if (!account || account.organization !== payload.orgId) {
+      return NextResponse.json({ error: "Conta não encontrada." }, { status: 404 });
+    }
+
+    const tokens = await pbAdmin.collection("oauth_tokens").getFullList({
+      filter: pbAdmin.filter("account = {:id}", { id: account.id }),
     });
+    const token = tokens[0] || null;
 
-    if (!account) return NextResponse.json({ error: "Conta não encontrada." }, { status: 404 });
-
-    if (!account.token) {
+    if (!token) {
       return NextResponse.json({
         success: true,
         result: {
@@ -44,8 +43,7 @@ export async function POST(_request: Request, { params }: RouteParams) {
       });
     }
 
-    // Verifica se é mock
-    if (account.token.accessToken.includes("mock-token")) {
+    if (token.accessToken.includes("mock-token")) {
       return NextResponse.json({
         success: true,
         result: {
@@ -58,29 +56,24 @@ export async function POST(_request: Request, { params }: RouteParams) {
     }
 
     const now = new Date();
-    const isExpired = account.token.expiresAt < now;
+    const isExpired = new Date(token.expiresAt) < now;
 
-    // Tenta usar o token atual (ou renovar se expirado)
-    let accessToken = account.token.accessToken;
+    let accessToken = token.accessToken;
 
     if (isExpired) {
-      // Tenta renovar via refresh_token
       try {
-        const refreshed = await MercadoLivreApiService.refreshToken(account.token.refreshToken);
+        const refreshed = await MercadoLivreApiService.refreshToken(token.refreshToken);
         if (refreshed?.access_token) {
           accessToken = refreshed.access_token;
-          // Salva token renovado
-          await prisma.oAuthToken.update({
-            where: { mercadoLivreAccountId: id },
-            data: {
-              accessToken: refreshed.access_token,
-              refreshToken: refreshed.refresh_token || account.token.refreshToken,
-              expiresAt: new Date(Date.now() + (refreshed.expires_in || 21600) * 1000),
-            },
+          
+          await pbAdmin.collection("oauth_tokens").update(token.id, {
+            accessToken: refreshed.access_token,
+            refreshToken: refreshed.refresh_token || token.refreshToken,
+            expiresAt: new Date(Date.now() + (refreshed.expires_in || 21600) * 1000).toISOString(),
           });
-          await prisma.mercadoLivreAccount.update({
-            where: { id },
-            data: { status: "CONNECTED" },
+          
+          await pbAdmin.collection("mercado_livre_accounts").update(id, {
+            status: "CONNECTED"
           });
         }
       } catch (refreshErr: any) {
@@ -96,19 +89,14 @@ export async function POST(_request: Request, { params }: RouteParams) {
       }
     }
 
-    // Faz a chamada /users/me
     const meliRes = await fetch("https://api.mercadolibre.com/users/me", {
       headers: { Authorization: `Bearer ${accessToken}`, Accept: "application/json" },
       signal: AbortSignal.timeout(10000),
     });
 
     if (!meliRes.ok) {
-      // Atualiza status da conta se o token foi rejeitado
       if (meliRes.status === 401) {
-        await prisma.mercadoLivreAccount.update({
-          where: { id },
-          data: { status: "EXPIRED" },
-        });
+        await pbAdmin.collection("mercado_livre_accounts").update(id, { status: "EXPIRED" });
       }
       return NextResponse.json({
         success: true,
@@ -126,7 +114,6 @@ export async function POST(_request: Request, { params }: RouteParams) {
     const userData = await meliRes.json();
     const returnedId = String(userData.id);
 
-    // Compara o meliUserId retornado com o salvo
     if (returnedId !== account.meliUserId) {
       return NextResponse.json({
         success: true,
@@ -139,13 +126,9 @@ export async function POST(_request: Request, { params }: RouteParams) {
       });
     }
 
-    // Atualiza status para CONNECTED se estava diferente
-    await prisma.mercadoLivreAccount.update({
-      where: { id },
-      data: {
-        status: "CONNECTED",
-        nickname: userData.nickname?.toUpperCase() || account.nickname,
-      },
+    await pbAdmin.collection("mercado_livre_accounts").update(id, {
+      status: "CONNECTED",
+      nickname: userData.nickname?.toUpperCase() || account.nickname,
     });
 
     const message = isExpired
