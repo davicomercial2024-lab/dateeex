@@ -25,7 +25,7 @@ export async function GET(request: Request) {
 
     const accounts = await pbAdmin.collection("mercado_livre_accounts").getFullList({
       filter,
-      sort: "created",
+      sort: "-created",
     });
 
     const diagnostics = await Promise.all(
