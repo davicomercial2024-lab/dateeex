@@ -33,16 +33,21 @@ export async function GET(request: Request) {
       ? `organization="${payload.orgId}"` 
       : `organization="${payload.orgId}" && isActive=true`;
 
+    console.log(`[API /accounts] Fetching accounts for org ${payload.orgId} with filter: ${filterStr}`);
+
     const accounts = await pbAdmin.collection("mercado_livre_accounts").getFullList({
       filter: filterStr,
-      sort: "-created",
     });
+
+    accounts.sort((a, b) => new Date(b.created).getTime() - new Date(a.created).getTime());
+
+    console.log(`[API /accounts] Found ${accounts.length} accounts.`);
 
     const accountsWithCounts = await Promise.all(accounts.map(async (acc) => {
       const [listings, orders, questions] = await Promise.all([
-        pbAdmin.collection("listings").getList(1, 1, { filter: `account="${acc.id}"` }).catch(() => ({ totalItems: 0 })),
-        pbAdmin.collection("orders").getList(1, 1, { filter: `account="${acc.id}"` }).catch(() => ({ totalItems: 0 })),
-        pbAdmin.collection("questions").getList(1, 1, { filter: `account="${acc.id}"` }).catch(() => ({ totalItems: 0 })),
+        pbAdmin.collection("listings").getList(1, 1, { filter: `account="${acc.id}"` }).catch((err) => { console.error("Error listings", err); return { totalItems: 0 } }),
+        pbAdmin.collection("orders").getList(1, 1, { filter: `account="${acc.id}"` }).catch((err) => { console.error("Error orders", err); return { totalItems: 0 } }),
+        pbAdmin.collection("questions").getList(1, 1, { filter: `account="${acc.id}"` }).catch((err) => { console.error("Error questions", err); return { totalItems: 0 } }),
       ]);
 
       return {
