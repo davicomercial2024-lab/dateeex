@@ -3,9 +3,14 @@ import { MercadoLivreApiService } from "./mercado-livre-api.service";
 
 export class MercadoLivreSyncService {
   static async getAccountAndToken(accountId: string, organizationId: string) {
-    const account = await pbAdmin.collection("mercado_livre_accounts").getFirstListItem(`id="${accountId}" && organization="${organizationId}"`);
-    const token = await pbAdmin.collection("oauth_tokens").getFirstListItem(`account="${account.id}"`);
-    return { account, token };
+    try {
+      const account = await pbAdmin.collection("mercado_livre_accounts").getFirstListItem(`id="${accountId}" && organization="${organizationId}"`);
+      const token = await pbAdmin.collection("oauth_tokens").getFirstListItem(`account="${account.id}"`);
+      return { account, token };
+    } catch (err: any) {
+      console.error(`Erro ao buscar account/token para accountId=${accountId}:`, err);
+      throw new Error(`getAccountAndToken failed: ${err.message}`);
+    }
   }
 
   static async syncDetailsAndReputation(accountId: string, organizationId: string): Promise<boolean> {

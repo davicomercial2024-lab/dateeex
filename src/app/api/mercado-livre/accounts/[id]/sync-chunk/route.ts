@@ -52,15 +52,23 @@ export async function POST(
 
     // Se tudo acabou e foi o último step (questions sem mais hasMore), marcamos como SUCCESS
     if (step === "questions" && !result.hasMore) {
-      await pbAdmin.collection("mercado_livre_accounts").update(accountId, {
-        lastSyncStatus: "SUCCESS",
-        lastSyncAt: new Date().toISOString()
-      });
+      try {
+        await pbAdmin.collection("mercado_livre_accounts").update(accountId, {
+          lastSyncStatus: "SUCCESS",
+          lastSyncAt: new Date().toISOString()
+        });
+      } catch (updateErr: any) {
+        console.error("Failed to update account status to SUCCESS:", updateErr);
+        throw new Error(`Update account failed: ${updateErr.message}`);
+      }
     }
 
     return NextResponse.json({ success: true, ...result });
   } catch (error: any) {
     console.error("[Sync Chunk Error]:", error);
-    return NextResponse.json({ error: error.message || "Internal error" }, { status: 500 });
+    if (error.response) {
+      console.error("[Sync Chunk Error Response]:", JSON.stringify(error.response, null, 2));
+    }
+    return NextResponse.json({ error: `${error.message} - STACK: ${error.stack}` }, { status: 500 });
   }
 }
