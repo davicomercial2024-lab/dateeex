@@ -4,10 +4,10 @@ import { pbAdmin } from "@/lib/pb";
 
 export async function POST(
   request: Request,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const accountId = params.id;
+    const { id: accountId } = await params;
     if (!accountId) {
       return NextResponse.json({ error: "Missing account ID" }, { status: 400 });
     }
