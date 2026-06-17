@@ -387,33 +387,33 @@ export class MercadoLivreApiService {
   }
 
   /**
-   * Busca anúncios (Listings) associados ao usuário
+   * Busca anúncios (Listings) em lotes (Chunks)
    */
-  static async fetchListings(meliUserId: string, accessToken: string): Promise<MeliItemPayload[]> {
+  static async fetchListingsChunk(meliUserId: string, accessToken: string, offset: number = 0, limit: number = 50): Promise<{ items: MeliItemPayload[], total: number }> {
     interface SearchResult {
       results: string[];
       paging: { total: number };
     }
     
-    // 1. Busca os IDs dos anúncios com paginação (limitado a 50 para evitar timeout)
     const allIds: string[] = [];
-    const limit = 50;
+    let total = 0;
     
     try {
       const searchRes = await this.request<SearchResult>(
-        `/users/${meliUserId}/items/search?limit=${limit}&offset=0`,
+        `/users/${meliUserId}/items/search?limit=${limit}&offset=${offset}`,
         accessToken
       );
       if (searchRes.results && searchRes.results.length > 0) {
         allIds.push(...searchRes.results);
       }
+      total = searchRes.paging?.total || 0;
     } catch (e) {
-      console.warn(`Erro na busca de items:`, e);
+      console.warn(`Erro na busca de items (chunk):`, e);
     }
 
-    if (allIds.length === 0) return [];
+    if (allIds.length === 0) return { items: [], total };
 
-    // 2. Faz o multiget em lotes de 20
+    // Faz o multiget em lotes de 20
     const batches: string[][] = [];
     const idsToProcess = [...allIds];
     while (idsToProcess.length > 0) {
@@ -422,7 +422,6 @@ export class MercadoLivreApiService {
 
     const items: MeliItemPayload[] = [];
     
-    // Processa lotes em paralelo, mas com um limite de concorrência simples (ex: 5 requests por vez)
     const chunkSize = 5;
     for (let i = 0; i < batches.length; i += chunkSize) {
       const chunk = batches.slice(i, i + chunkSize);
@@ -441,34 +440,35 @@ export class MercadoLivreApiService {
       });
     }
 
-    return items;
+    return { items, total };
   }
 
   /**
-   * Busca as vendas (Orders) associadas ao usuário
+   * Busca as vendas (Orders) em lotes (Chunks)
    */
-  static async fetchOrders(meliUserId: string, accessToken: string): Promise<MeliOrderPayload[]> {
+  static async fetchOrdersChunk(meliUserId: string, accessToken: string, offset: number = 0, limit: number = 50): Promise<{ orders: MeliOrderPayload[], total: number }> {
     interface SearchResult {
       results: MeliOrderPayload[];
       paging: { total: number };
     }
 
     const allOrders: MeliOrderPayload[] = [];
-    const limit = 50;
+    let total = 0;
 
     try {
       const searchRes = await this.request<SearchResult>(
-        `/orders/search?seller=${meliUserId}&limit=${limit}&offset=0`,
+        `/orders/search?seller=${meliUserId}&limit=${limit}&offset=${offset}`,
         accessToken
       );
       if (searchRes.results && searchRes.results.length > 0) {
         allOrders.push(...searchRes.results);
       }
+      total = searchRes.paging?.total || 0;
     } catch (e) {
-      console.warn(`Erro na busca de orders:`, e);
+      console.warn(`Erro na busca de orders (chunk):`, e);
     }
 
-    return allOrders;
+    return { orders: allOrders, total };
   }
 
   /**
@@ -493,19 +493,27 @@ export class MercadoLivreApiService {
   }
 
   /**
-   * Busca perguntas (Questions) associadas aos anúncios do vendedor
+   * Busca perguntas (Questions) em lotes (Chunks)
    */
-  static async fetchQuestions(meliUserId: string, accessToken: string): Promise<MeliQuestionPayload[]> {
+  static async fetchQuestionsChunk(meliUserId: string, accessToken: string, offset: number = 0, limit: number = 50): Promise<{ questions: MeliQuestionPayload[], total: number }> {
     interface SearchResult {
       questions: MeliQuestionPayload[];
+      total: number;
     }
 
-    const searchRes = await this.request<SearchResult>(
-      `/questions/search?seller_id=${meliUserId}&limit=50`,
-      accessToken
-    );
-
-    return searchRes.questions || [];
+    try {
+      const searchRes = await this.request<SearchResult>(
+        `/questions/search?seller_id=${meliUserId}&limit=${limit}&offset=${offset}`,
+        accessToken
+      );
+      return {
+        questions: searchRes.questions || [],
+        total: searchRes.total || 0
+      };
+    } catch (e) {
+      console.warn(`Erro na busca de questions (chunk):`, e);
+      return { questions: [], total: 0 };
+    }
   }
 
   /**

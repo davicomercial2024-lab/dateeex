@@ -1,0 +1,55 @@
+import { NextResponse } from "next/server";
+import { MercadoLivreSyncService } from "@/services/mercado-livre-sync.service";
+import { pbAdmin } from "@/lib/pocketbase";
+
+export async function POST(
+  request: Request,
+  { params }: { params: { id: string } }
+) {
+  try {
+    const accountId = params.id;
+    if (!accountId) {
+      return NextResponse.json({ error: "Missing account ID" }, { status: 400 });
+    }
+
+    const body = await request.json();
+    const { step, offset = 0, limit = 50, orgId } = body;
+
+    if (!step || !orgId) {
+      return NextResponse.json({ error: "Missing step or orgId" }, { status: 400 });
+    }
+
+    let result = { hasMore: false, total: 0 };
+
+    switch (step) {
+      case "details":
+        await MercadoLivreSyncService.syncDetailsAndReputation(accountId, orgId);
+        result = { hasMore: false, total: 1 };
+        break;
+      case "listings":
+        result = await MercadoLivreSyncService.syncListingsChunk(accountId, orgId, offset, limit);
+        break;
+      case "orders":
+        result = await MercadoLivreSyncService.syncOrdersChunk(accountId, orgId, offset, limit);
+        break;
+      case "questions":
+        result = await MercadoLivreSyncService.syncQuestionsChunk(accountId, orgId, offset, limit);
+        break;
+      default:
+        return NextResponse.json({ error: "Invalid step" }, { status: 400 });
+    }
+
+    // Se tudo acabou e foi o último step (questions sem mais hasMore), marcamos como SUCCESS
+    if (step === "questions" && !result.hasMore) {
+      await pbAdmin.collection("mercado_livre_accounts").update(accountId, {
+        lastSyncStatus: "SUCCESS",
+        lastSyncAt: new Date().toISOString()
+      });
+    }
+
+    return NextResponse.json({ success: true, ...result });
+  } catch (error: any) {
+    console.error("[Sync Chunk Error]:", error);
+    return NextResponse.json({ error: error.message || "Internal error" }, { status: 500 });
+  }
+}

@@ -226,30 +226,12 @@ export async function GET(request: Request) {
       lastSyncStatus: "SYNCING",
     });
 
-    try {
-      const { MercadoLivreSyncService } = await import("@/services/mercado-livre-sync.service");
-      const report = await MercadoLivreSyncService.syncAccount(
-        finalAccountId,
-        payload.orgId,
-        payload.userId
-      );
-      await pbAdmin.collection("mercado_livre_accounts").update(finalAccountId, {
-        lastSyncAt: new Date().toISOString(),
-        lastSyncStatus: report.errors.length === 0 ? "SUCCESS" : "PARTIAL",
-        lastSyncError: report.errors.length > 0 ? report.errors.join("; ") : null,
-      });
-    } catch (syncErr: unknown) {
-      const msg = syncErr instanceof Error ? syncErr.message : String(syncErr);
-      console.error(`[ML Callback] Erro na sync inicial:`, msg);
-      await pbAdmin.collection("mercado_livre_accounts").update(finalAccountId, {
-        lastSyncStatus: "FAILED", lastSyncError: msg 
-      });
-    }
-
+    // Removida a sincronização total síncrona para evitar timeout da Netlify (10s)
+    // A sincronização real será disparada de forma fracionada pelo frontend no dashboard
     const successParam = isNew ? "connected=true" : "reconnected=true";
     console.log(`[ML Callback] ${isNew ? "Nova conta" : "Reconexão"} concluída: ${nickname}`);
     return redirectWithClearedState(
-      `${redirectBase}?${successParam}&nickname=${encodeURIComponent(nickname)}`,
+      `${redirectBase}?${successParam}&start_sync=true&accountId=${finalAccountId}&nickname=${encodeURIComponent(nickname)}`,
       request.url
     );
 
