@@ -176,7 +176,7 @@ export class WebhookProcessorService {
       totalAmount: order.total_amount,
       buyerNickname: order.buyer?.nickname || "Desconhecido",
       dateCreated: order.date_created ? new Date(order.date_created).toISOString() : undefined,
-      currencyId: order.currency_id,
+      currencyId: (order as any).currency_id,
       itemCount: order.order_items?.length || 0,
     };
 
@@ -280,9 +280,9 @@ export class WebhookProcessorService {
       status: item.status,
       permalink: item.permalink,
       thumbnail: item.thumbnail,
-      condition: item.condition,
-      catalogProductId: item.catalog_product_id,
-      health: item.health,
+      condition: (item as any).condition,
+      catalogProductId: (item as any).catalog_product_id,
+      health: (item as any).health,
     };
 
     const existingListings = await pbAdmin.collection('listings').getFullList({

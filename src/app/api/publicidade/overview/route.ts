@@ -155,11 +155,11 @@ export async function GET(request: Request) {
     const errors: Array<{ accountId: string; accountName: string; product: string; message: string }> = [];
 
     for (const account of accounts) {
-      const accountLabel = account.nicknameCustom || account.nickname;
+      const accountLabel = (account as any).nicknameCustom || (account as any).nickname;
       const accountSummary = {
         id: account.id,
         displayName: accountLabel,
-        siteId: account.siteId,
+        siteId: (account as any).siteId,
         products: {
           PADS: { advertisers: 0, campaigns: 0, ads: 0, available: false },
           BADS: { advertisers: 0, campaigns: 0, ads: 0, available: false },
@@ -352,6 +352,9 @@ export async function GET(request: Request) {
     let productCampaignDetail: any = null;
     if (selectedProductCampaign) {
       try {
+        // Conversões (apenas exemplo)
+        let currencyRate = 1; // Se MLB = BRL (1), se MXN = outra (fictício)
+        if ((accounts.find(a => a.id === selectedProductCampaign.accountId) as any)?.siteId === "MLB") currencyRate = 1;
         productCampaignDetail = await PublicidadeApiService.fetchProductAdsCampaignDetail({
           accessToken:
             accounts.find((account) => account.id === selectedProductCampaign.accountId)?.token?.accessToken || "",

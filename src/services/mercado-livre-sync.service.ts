@@ -153,10 +153,10 @@ export class MercadoLivreSyncService {
             account: accountId,
             levelId: rep.level_id || "unknown",
             powerSellerStatus: rep.power_seller_status || "",
-            transactionsTotal: rep.transactions?.total || 0,
+            transactionsTotal: (rep.transactions as any)?.total || 0,
             transactionsCompleted: rep.transactions?.completed || 0,
-            transactionsCanceled: rep.transactions?.canceled || 0,
-            metricsSalesCompleted: rep.metrics?.sales?.completed || 0,
+            transactionsCanceled: (rep.transactions as any)?.canceled || 0,
+            metricsSalesCompleted: (rep.metrics as any)?.sales?.completed || 0,
           };
 
           let repRecord;
@@ -193,12 +193,12 @@ export class MercadoLivreSyncService {
             price: item.price || 0,
             availableQuantity: item.available_quantity || 0,
             soldQuantity: item.sold_quantity || 0,
-            condition: item.condition || "",
+            condition: (item as any).condition || "",
             permalink: item.permalink || "",
             thumbnail: item.thumbnail || "",
             status: item.status || "active",
-            catalogProductId: item.catalog_product_id || "",
-            health: item.health || 0,
+            catalogProductId: (item as any).catalog_product_id || "",
+            health: (item as any).health || 0,
             visits: 0
           };
 
@@ -230,7 +230,7 @@ export class MercadoLivreSyncService {
             status: order.status,
             dateCreated: new Date(order.date_created).toISOString(),
             totalAmount: order.total_amount,
-            currencyId: order.currency_id || "BRL",
+            currencyId: (order as any).currency_id || "BRL",
             buyerNickname: order.buyer?.nickname || "Desconhecido",
             itemCount: order.order_items ? order.order_items.length : 0
           };

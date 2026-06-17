@@ -166,7 +166,7 @@ export async function GET(request: Request) {
         }
 
         const rawCampaigns = await MercadoLivreApiService.fetchSellerPromotionsV2(
-          account.meliUserId,
+          (account as any).meliUserId,
           account.token.accessToken
         );
 
@@ -202,7 +202,7 @@ export async function GET(request: Request) {
           stock: listing.availableQuantity,
           soldQuantity: listing.soldQuantity,
           accountId: account.id,
-          accountLabel: account.nicknameCustom || account.nickname,
+          accountLabel: (account as any).nicknameCustom || (account as any).nickname,
           currencyId: listing.currencyId,
           currentPromotion: activeOffer
             ? {

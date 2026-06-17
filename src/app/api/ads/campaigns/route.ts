@@ -57,7 +57,7 @@ export async function GET(request: Request) {
     for (const account of accounts) {
       if (!account.token) continue;
       const accessToken = account.token.accessToken;
-      const meliUserId = account.meliUserId;
+      const meliUserId = (account as any).meliUserId;
 
       const campaigns = await MercadoLivreApiService.fetchCampaigns(meliUserId, accessToken);
 
@@ -82,7 +82,7 @@ export async function GET(request: Request) {
           status: camp.status, // active, paused
           budget: camp.daily_budget,
           accountId: account.id,
-          accountName: account.nicknameCustom || account.nickname,
+          accountName: (account as any).nicknameCustom || (account as any).nickname,
           metrics: {
             clicks: campClicks,
             cost: campCost,
