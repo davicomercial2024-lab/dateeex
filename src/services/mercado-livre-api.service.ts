@@ -395,25 +395,20 @@ export class MercadoLivreApiService {
       paging: { total: number };
     }
     
-    // 1. Busca TODOS os IDs dos anúncios com paginação
+    // 1. Busca os IDs dos anúncios com paginação (limitado a 50 para evitar timeout)
     const allIds: string[] = [];
-    let offset = 0;
     const limit = 50;
     
-    while (true) {
-      try {
-        const searchRes = await this.request<SearchResult>(
-          `/users/${meliUserId}/items/search?limit=${limit}&offset=${offset}`,
-          accessToken
-        );
-        if (!searchRes.results || searchRes.results.length === 0) break;
+    try {
+      const searchRes = await this.request<SearchResult>(
+        `/users/${meliUserId}/items/search?limit=${limit}&offset=0`,
+        accessToken
+      );
+      if (searchRes.results && searchRes.results.length > 0) {
         allIds.push(...searchRes.results);
-        offset += limit;
-        if (offset >= (searchRes.paging?.total || 0)) break;
-      } catch (e) {
-        console.warn(`Erro na paginação de items (offset ${offset}):`, e);
-        break; // Sai do loop mas preserva o que já buscou
       }
+    } catch (e) {
+      console.warn(`Erro na busca de items:`, e);
     }
 
     if (allIds.length === 0) return [];
@@ -459,23 +454,18 @@ export class MercadoLivreApiService {
     }
 
     const allOrders: MeliOrderPayload[] = [];
-    let offset = 0;
     const limit = 50;
 
-    while (true) {
-      try {
-        const searchRes = await this.request<SearchResult>(
-          `/orders/search?seller=${meliUserId}&limit=${limit}&offset=${offset}`,
-          accessToken
-        );
-        if (!searchRes.results || searchRes.results.length === 0) break;
+    try {
+      const searchRes = await this.request<SearchResult>(
+        `/orders/search?seller=${meliUserId}&limit=${limit}&offset=0`,
+        accessToken
+      );
+      if (searchRes.results && searchRes.results.length > 0) {
         allOrders.push(...searchRes.results);
-        offset += limit;
-        if (offset >= (searchRes.paging?.total || 0)) break;
-      } catch (e) {
-        console.warn(`Erro na paginação de orders (offset ${offset}):`, e);
-        break;
       }
+    } catch (e) {
+      console.warn(`Erro na busca de orders:`, e);
     }
 
     return allOrders;
