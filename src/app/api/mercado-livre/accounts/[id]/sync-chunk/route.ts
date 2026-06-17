@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { MercadoLivreSyncService } from "@/services/mercado-livre-sync.service";
-import { pbAdmin } from "@/lib/pocketbase";
+import { pbAdmin } from "@/lib/pb";
 
 export async function POST(
   request: Request,

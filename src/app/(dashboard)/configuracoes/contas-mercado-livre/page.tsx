@@ -293,7 +293,7 @@ function SyncModal({
               <div className="relative h-3 overflow-hidden rounded-full bg-secondary/50 shadow-inner">
                 <div 
                   className="absolute inset-y-0 left-0 bg-gradient-to-r from-sky-400 to-sky-600 transition-all duration-300 ease-out"
-                  style={{ width: \`\${progress}%\` }}
+                  style={{ width: `${progress}%` }}
                 >
                   <div className="absolute inset-0 bg-white/20 w-full animate-[shimmer_1s_infinite] -skew-x-12" />
                 </div>
