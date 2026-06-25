@@ -175,11 +175,11 @@ function SyncModal({
         let hasMore = true;
         setStep("listings");
         while (hasMore && !isCancelled) {
-          const res = await fetch(`/api/mercado-livre/accounts/${account.id}/sync-chunk`, {
+          const resListings = await fetch(`/api/mercado-livre/accounts/${account.id}/sync-chunk`, {
             method: "POST", headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ step: "listings", scrollId, offset, limit: 50 }),
           });
-          const data = await res.json();
+          const data = await resListings.json();
           if (!data.success) throw new Error(data.error);
           hasMore = data.hasMore;
           scrollId = data.scrollId;
@@ -195,11 +195,11 @@ function SyncModal({
         hasMore = true;
         setStep("orders");
         while (hasMore && !isCancelled) {
-          const res = await fetch(`/api/mercado-livre/accounts/${account.id}/sync-chunk`, {
+          const resOrders = await fetch(`/api/mercado-livre/accounts/${account.id}/sync-chunk`, {
             method: "POST", headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ step: "orders", offset, limit: 50 }),
           });
-          const data = await res.json();
+          const data = await resOrders.json();
           if (!data.success) throw new Error(data.error);
           hasMore = data.hasMore;
           offset += 50;
@@ -214,11 +214,11 @@ function SyncModal({
         hasMore = true;
         setStep("questions");
         while (hasMore && !isCancelled) {
-          const res = await fetch(`/api/mercado-livre/accounts/${account.id}/sync-chunk`, {
+          const resQuestions = await fetch(`/api/mercado-livre/accounts/${account.id}/sync-chunk`, {
             method: "POST", headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ step: "questions", offset, limit: 50 }),
           });
-          const data = await res.json();
+          const data = await resQuestions.json();
           if (!data.success) throw new Error(data.error);
           hasMore = data.hasMore;
           offset += 50;
