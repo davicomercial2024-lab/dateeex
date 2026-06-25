@@ -12,14 +12,20 @@ export async function GET() {
     const sessionCookie = cookieStore.get("datex_session");
 
     if (!sessionCookie) {
-      return NextResponse.json({ error: "Sessão não encontrada." }, { status: 401 });
+      return NextResponse.json({ error: "Sessão não encontrada." }, { 
+        status: 401,
+        headers: { "Cache-Control": "no-store, max-age=0, must-revalidate" }
+      });
     }
 
     // Valida o token customizado
     const payload = await verifyToken(sessionCookie.value);
 
     if (!payload) {
-      return NextResponse.json({ error: "Sessão inválida ou expirada." }, { status: 401 });
+      return NextResponse.json({ error: "Sessão inválida ou expirada." }, { 
+        status: 401,
+        headers: { "Cache-Control": "no-store, max-age=0, must-revalidate" }
+      });
     }
 
     // Autentica admin para queries
@@ -59,6 +65,11 @@ export async function GET() {
         id: activeMembership.expand?.organization?.id,
         name: activeMembership.expand?.organization?.name,
       },
+    }, {
+      headers: {
+        "Cache-Control": "no-store, max-age=0, must-revalidate",
+        "Pragma": "no-cache"
+      }
     });
   } catch (error) {
     console.error("API Me Error:", error);
