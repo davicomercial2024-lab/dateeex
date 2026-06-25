@@ -154,6 +154,9 @@ function SyncModal({
 
   const [counters, setCounters] = useState({ listings: 0, orders: 0, questions: 0 });
 
+  const onCompleteRef = useRef(onComplete);
+  useEffect(() => { onCompleteRef.current = onComplete; }, [onComplete]);
+
   useEffect(() => {
     let isCancelled = false;
 
@@ -186,7 +189,7 @@ function SyncModal({
           offset += 50;
           
           setCounters(c => ({ ...c, listings: Math.min(offset, data.total) }));
-          const p = data.total > 0 ? (offset / data.total) * 100 : 100;
+          const p = data.total > 0 ? (Math.min(offset, data.total) / data.total) * 100 : 100;
           setProgress(10 + p * 0.3); // Ocupa 30% da barra
         }
 
@@ -205,7 +208,7 @@ function SyncModal({
           offset += 50;
           
           setCounters(c => ({ ...c, orders: Math.min(offset, data.total) }));
-          const p = data.total > 0 ? (offset / data.total) * 100 : 100;
+          const p = data.total > 0 ? (Math.min(offset, data.total) / data.total) * 100 : 100;
           setProgress(40 + p * 0.4); // Ocupa 40% da barra
         }
 
@@ -224,7 +227,7 @@ function SyncModal({
           offset += 50;
           
           setCounters(c => ({ ...c, questions: Math.min(offset, data.total) }));
-          const p = data.total > 0 ? (offset / data.total) * 100 : 100;
+          const p = data.total > 0 ? (Math.min(offset, data.total) / data.total) * 100 : 100;
           setProgress(80 + p * 0.2); // Ocupa 20% da barra
         }
 
@@ -232,7 +235,7 @@ function SyncModal({
         setStep("done");
         setProgress(100);
         setTimeout(() => {
-          if (!isCancelled) onComplete();
+          if (!isCancelled) onCompleteRef.current();
         }, 1500);
 
       } catch (err: any) {
@@ -243,7 +246,7 @@ function SyncModal({
     runSync();
 
     return () => { isCancelled = true; };
-  }, [account, onComplete]);
+  }, [account.id]);
 
   const stepLabels = {
     details: "Atualizando dados da conta...",
@@ -691,7 +694,7 @@ export default function ContasMercadoLivrePage() {
   };
 
   return (
-    <div className="space-y-8 animate-in fade-in duration-500 pb-10">
+    <>
       {syncingAccount && (
         <SyncModal
           account={syncingAccount}
@@ -699,7 +702,8 @@ export default function ContasMercadoLivrePage() {
           onCancel={() => setSyncingAccount(null)}
         />
       )}
-      {/* Header */}
+      <div className="space-y-8 animate-in fade-in duration-500 pb-10">
+        {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 border-b border-border/40 pb-5">
         <div className="space-y-1">
           <h1 className="text-xl md:text-2xl font-extrabold tracking-tight text-foreground/90 flex items-center gap-2">
@@ -802,5 +806,6 @@ export default function ContasMercadoLivrePage() {
         </div>
       )}
     </div>
+    </>
   );
 }

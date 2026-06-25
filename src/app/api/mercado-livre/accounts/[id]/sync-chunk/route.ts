@@ -18,6 +18,8 @@ export async function POST(
     if (!payload) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     const orgId = payload.orgId;
 
+    await pbAdmin.admins.authWithPassword(process.env.PB_ADMIN_EMAIL as string, process.env.PB_ADMIN_PASS as string);
+
     const { id: accountId } = await params;
     if (!accountId) {
       return NextResponse.json({ error: "Missing account ID" }, { status: 400 });

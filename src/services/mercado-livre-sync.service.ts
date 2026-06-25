@@ -5,8 +5,8 @@ export class MercadoLivreSyncService {
   static async getAccountAndToken(accountId: string, organizationId: string, retries = 3) {
     for (let i = 0; i < retries; i++) {
       try {
-        const account = await pbAdmin.collection("mercado_livre_accounts").getFirstListItem(`id="${accountId}" && organization="${organizationId}"`);
-        const token = await pbAdmin.collection("oauth_tokens").getFirstListItem(`account="${account.id}"`);
+        const account = await pbAdmin.collection("mercado_livre_accounts").getFirstListItem(`id="${accountId}" && organization="${organizationId}"`, { requestKey: null });
+        const token = await pbAdmin.collection("oauth_tokens").getFirstListItem(`account="${account.id}"`, { requestKey: null });
         return { account, token };
       } catch (err: any) {
         if (i === retries - 1) {
@@ -44,10 +44,10 @@ export class MercadoLivreSyncService {
         };
 
         try {
-          const repRecord = await pbAdmin.collection("seller_reputations").getFirstListItem(`account="${accountId}"`);
-          await pbAdmin.collection("seller_reputations").update(repRecord.id, repData);
+          const repRecord = await pbAdmin.collection("seller_reputations").getFirstListItem(`account="${accountId}"`, { requestKey: null });
+          await pbAdmin.collection("seller_reputations").update(repRecord.id, repData, { requestKey: null });
         } catch(e) {
-          await pbAdmin.collection("seller_reputations").create(repData);
+          await pbAdmin.collection("seller_reputations").create(repData, { requestKey: null });
         }
       }
       return true;
@@ -71,7 +71,6 @@ export class MercadoLivreSyncService {
           mlItemId: item.id,
           title: item.title,
           price: item.price,
-          currencyId: item.currency_id || "BRL",
           availableQuantity: item.available_quantity,
           soldQuantity: item.sold_quantity,
           status: item.status,
@@ -81,10 +80,10 @@ export class MercadoLivreSyncService {
         };
 
         try {
-          const existing = await pbAdmin.collection("listings").getFirstListItem(`account="${accountId}" && mlItemId="${item.id}"`);
-          await pbAdmin.collection("listings").update(existing.id, listingData);
+          const existing = await pbAdmin.collection("listings").getFirstListItem(`account="${accountId}" && mlItemId="${item.id}"`, { requestKey: null });
+          await pbAdmin.collection("listings").update(existing.id, listingData, { requestKey: null });
         } catch (e) {
-          await pbAdmin.collection("listings").create(listingData);
+          await pbAdmin.collection("listings").create(listingData, { requestKey: null });
         }
       } catch (err) {
         console.error(`Erro ao processar listing ${item.id}:`, err);
@@ -115,10 +114,10 @@ export class MercadoLivreSyncService {
         };
 
         try {
-          const existing = await pbAdmin.collection("orders").getFirstListItem(`account="${accountId}" && mlOrderId="${order.id.toString()}"`);
-          await pbAdmin.collection("orders").update(existing.id, orderData);
+          const existing = await pbAdmin.collection("orders").getFirstListItem(`account="${accountId}" && mlOrderId="${order.id.toString()}"`, { requestKey: null });
+          await pbAdmin.collection("orders").update(existing.id, orderData, { requestKey: null });
         } catch (e) {
-          await pbAdmin.collection("orders").create(orderData);
+          await pbAdmin.collection("orders").create(orderData, { requestKey: null });
         }
       } catch (err) {
         console.error(`Erro ao processar order ${order.id}:`, err);
@@ -148,10 +147,10 @@ export class MercadoLivreSyncService {
         };
 
         try {
-          const existing = await pbAdmin.collection("questions").getFirstListItem(`account="${accountId}" && mlQuestionId="${question.id.toString()}"`);
-          await pbAdmin.collection("questions").update(existing.id, questionData);
+          const existing = await pbAdmin.collection("questions").getFirstListItem(`account="${accountId}" && mlQuestionId="${question.id.toString()}"`, { requestKey: null });
+          await pbAdmin.collection("questions").update(existing.id, questionData, { requestKey: null });
         } catch (e) {
-          await pbAdmin.collection("questions").create(questionData);
+          await pbAdmin.collection("questions").create(questionData, { requestKey: null });
         }
       } catch (err) {
         console.error(`Erro ao processar question ${question.id}:`, err);

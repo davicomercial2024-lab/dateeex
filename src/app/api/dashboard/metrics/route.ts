@@ -46,6 +46,8 @@ export async function GET(request: Request) {
       return NextResponse.json({ error: "Sessão inválida ou expirada." }, { status: 401 });
     }
 
+    await pbAdmin.admins.authWithPassword(process.env.PB_ADMIN_EMAIL as string, process.env.PB_ADMIN_PASS as string);
+
     const { searchParams } = new URL(request.url);
     const accountId = searchParams.get("accountId") || "all";
     const period = searchParams.get("period") || "30";
@@ -75,35 +77,35 @@ export async function GET(request: Request) {
     const baseParams = { orgId, acc: accountId };
     const accFilter = accountId !== "all" ? " && account = {:acc}" : "";
 
-    const activeListingsP = pbAdmin.collection("listings").getList(1, 1, { filter: pbAdmin.filter(`organization = {:orgId} && status = 'active'` + accFilter, baseParams) }).catch(() => ({ totalItems: 0 }));
-    const pausedListingsP = pbAdmin.collection("listings").getList(1, 1, { filter: pbAdmin.filter(`organization = {:orgId} && status = 'paused'` + accFilter, baseParams) }).catch(() => ({ totalItems: 0 }));
-    const pendingQuestionsP = pbAdmin.collection("questions").getList(1, 1, { filter: pbAdmin.filter(`organization = {:orgId} && status = 'unanswered'` + accFilter, baseParams) }).catch(() => ({ totalItems: 0 }));
-    const activeClaimsP = pbAdmin.collection("claims").getList(1, 1, { filter: pbAdmin.filter(`organization = {:orgId} && stage != 'closed'` + accFilter, baseParams) }).catch(() => ({ totalItems: 0 }));
+    const activeListingsP = pbAdmin.collection("listings").getList(1, 1, { requestKey: null, filter: pbAdmin.filter(`organization = {:orgId} && status = 'active'` + accFilter, baseParams) }).catch((e) => { console.error("Err listings:", e); return { totalItems: 0 }; });
+    const pausedListingsP = pbAdmin.collection("listings").getList(1, 1, { requestKey: null, filter: pbAdmin.filter(`organization = {:orgId} && status = 'paused'` + accFilter, baseParams) }).catch((e) => { console.error("Err paused:", e); return { totalItems: 0 }; });
+    const pendingQuestionsP = pbAdmin.collection("questions").getList(1, 1, { requestKey: null, filter: pbAdmin.filter(`organization = {:orgId} && status = 'unanswered'` + accFilter, baseParams) }).catch((e) => { console.error("Err questions:", e); return { totalItems: 0 }; });
+    const activeClaimsP = pbAdmin.collection("claims").getList(1, 1, { requestKey: null, filter: pbAdmin.filter(`organization = {:orgId} && stage != 'closed'` + accFilter, baseParams) }).catch((e) => { console.error("Err claims:", e); return { totalItems: 0 }; });
     
     const twoDaysAgo = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString().replace("T", " ");
     const lateShipmentsP = pbAdmin.collection("shipments").getList(1, 1, { 
-      filter: pbAdmin.filter(`organization = {:orgId} && (status = 'ready_to_ship' || status = 'handling') && created < {:twoDaysAgo}` + accFilter, { ...baseParams, twoDaysAgo }) 
-    }).catch(() => ({ totalItems: 0 }));
+      requestKey: null, filter: pbAdmin.filter(`organization = {:orgId} && (status = 'ready_to_ship' || status = 'handling') && created < {:twoDaysAgo}` + accFilter, { ...baseParams, twoDaysAgo }) 
+    }).catch((e) => { console.error("Err shipments:", e); return { totalItems: 0 }; });
 
-    const activePromotionsP = pbAdmin.collection("promotions").getList(1, 1, { filter: pbAdmin.filter(`organization = {:orgId} && status = 'active'`, baseParams) }).catch(() => ({ totalItems: 0 }));
-    const activeCampaignsP = pbAdmin.collection("advertising_campaigns").getList(1, 1, { filter: pbAdmin.filter(`organization = {:orgId} && status = 'active'`, baseParams) }).catch(() => ({ totalItems: 0 }));
+    const activePromotionsP = pbAdmin.collection("promotions").getList(1, 1, { requestKey: null, filter: pbAdmin.filter(`organization = {:orgId} && status = 'active'`, baseParams) }).catch((e) => { console.error("Err promos:", e); return { totalItems: 0 }; });
+    const activeCampaignsP = pbAdmin.collection("advertising_campaigns").getList(1, 1, { requestKey: null, filter: pbAdmin.filter(`organization = {:orgId} && status = 'active'`, baseParams) }).catch((e) => { console.error("Err campaigns:", e); return { totalItems: 0 }; });
 
     const latestReputationP = pbAdmin.collection("seller_reputations").getList(1, 1, { 
-      filter: pbAdmin.filter(`organization = {:orgId}` + accFilter, baseParams),
+      requestKey: null, filter: pbAdmin.filter(`organization = {:orgId}` + accFilter, baseParams),
       sort: "-created"
-    }).catch(() => ({ items: [] }));
+    }).catch((e) => { console.error("Err rep:", e); return { items: [] }; });
 
-    const allListingsP = pbAdmin.collection("listings").getFullList({ filter: pbAdmin.filter(`organization = {:orgId}` + accFilter, baseParams), fields: "status" }).catch(() => []);
-    const allPromotionsP = pbAdmin.collection("promotions").getFullList({ filter: pbAdmin.filter(`organization = {:orgId}`, baseParams), fields: "status" }).catch(() => []);
-    const accountsP = accountId === "all" ? pbAdmin.collection("mercado_livre_accounts").getFullList({ filter: pbAdmin.filter(`organization = {:orgId}`, baseParams) }).catch(() => []) : Promise.resolve([]);
+    const allListingsP = pbAdmin.collection("listings").getFullList({ requestKey: null, filter: pbAdmin.filter(`organization = {:orgId}` + accFilter, baseParams), fields: "status" }).catch((e) => { console.error("Err allListings:", e); return []; });
+    const allPromotionsP = pbAdmin.collection("promotions").getFullList({ requestKey: null, filter: pbAdmin.filter(`organization = {:orgId}`, baseParams), fields: "status" }).catch((e) => { console.error("Err allPromos:", e); return []; });
+    const accountsP = accountId === "all" ? pbAdmin.collection("mercado_livre_accounts").getFullList({ requestKey: null, filter: pbAdmin.filter(`organization = {:orgId}`, baseParams) }).catch((e) => { console.error("Err accounts:", e); return []; }) : Promise.resolve([]);
 
     const ordersP = pbAdmin.collection("orders").getFullList({
-      filter: pbAdmin.filter(`organization = {:orgId} && dateCreated >= {:start} && dateCreated <= {:end}` + accFilter, {
+      requestKey: null, filter: pbAdmin.filter(`organization = {:orgId} && dateCreated >= {:start} && dateCreated <= {:end}` + accFilter, {
         ...baseParams,
-        start: rangeStart.toISOString().replace("T", " "),
-        end: rangeEnd.toISOString().replace("T", " "),
+        start: rangeStart.toISOString(), // Fix: use regular ISO string so it includes 'T'
+        end: rangeEnd.toISOString(),     // Fix: use regular ISO string
       })
-    }).catch(() => []);
+    }).catch((e) => { console.error("Err orders:", e); return []; });
 
     const [
       activeListingsRes,
