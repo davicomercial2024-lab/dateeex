@@ -175,7 +175,7 @@ function SyncModal({
         let hasMore = true;
         setStep("listings");
         while (hasMore && !isCancelled) {
-          const resListings = await fetch(`/api/mercado-livre/accounts/${account.id}/sync-chunk`, {
+          const resListings: Response = await fetch(`/api/mercado-livre/accounts/${account.id}/sync-chunk`, {
             method: "POST", headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ step: "listings", scrollId, offset, limit: 50 }),
           });
@@ -195,7 +195,7 @@ function SyncModal({
         hasMore = true;
         setStep("orders");
         while (hasMore && !isCancelled) {
-          const resOrders = await fetch(`/api/mercado-livre/accounts/${account.id}/sync-chunk`, {
+          const resOrders: Response = await fetch(`/api/mercado-livre/accounts/${account.id}/sync-chunk`, {
             method: "POST", headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ step: "orders", offset, limit: 50 }),
           });
@@ -214,7 +214,7 @@ function SyncModal({
         hasMore = true;
         setStep("questions");
         while (hasMore && !isCancelled) {
-          const resQuestions = await fetch(`/api/mercado-livre/accounts/${account.id}/sync-chunk`, {
+          const resQuestions: Response = await fetch(`/api/mercado-livre/accounts/${account.id}/sync-chunk`, {
             method: "POST", headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ step: "questions", offset, limit: 50 }),
           });
