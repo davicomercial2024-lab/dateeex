@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1400" height="500" viewBox="0 0 1400 500" role="img" aria-label="Datex monochrome logo">
+<rect width="1400" height="500" fill="transparent"/>
+<g transform="translate(85,100) scale(1.35)">
+  <path fill="#FFFFFF" fill-rule="evenodd" d="M20 20 H155 C223 20 262 72 262 110 C262 148 223 200 155 200 H20 Z M62 70 H150 C184 70 210 90 224 110 C210 130 184 150 150 150 H62 Z"/>
+  <path fill="#FFFFFF" d="M214 28 H278 L365 200 H301 Z" transform="skewX(-6)"/>
+  <path fill="#FFFFFF" d="M300 20 H360 L292 102 H235 Z"/>
+  <rect x="82" y="77" width="25" height="25" rx="2" fill="#FFFFFF"/>
+  <rect x="119" y="77" width="25" height="25" rx="2" fill="#FFFFFF"/>
+  <rect x="156" y="77" width="25" height="25" rx="2" fill="#FFFFFF"/>
+  <rect x="82" y="115" width="25" height="25" rx="2" fill="#FFFFFF"/>
+  <rect x="119" y="115" width="25" height="25" rx="2" fill="#FFFFFF"/>
+  <rect x="156" y="115" width="25" height="25" rx="2" fill="#FFFFFF"/>
+  <rect x="82" y="153" width="25" height="25" rx="2" fill="#FFFFFF"/>
+  <rect x="119" y="153" width="25" height="25" rx="2" fill="#FFFFFF"/>
+  <rect x="156" y="153" width="25" height="25" rx="2" fill="#FFFFFF"/>
+</g>
+<text x="610" y="270" font-family="Inter, Montserrat, Arial, sans-serif" font-size="150" font-weight="800" letter-spacing="-6" fill="#FFFFFF">Datex</text>
+<text x="615" y="345" font-family="Inter, Montserrat, Arial, sans-serif" font-size="36" font-weight="600" letter-spacing="18" fill="#FFFFFF">GESTÃO INTELIGENTE</text>
+</svg>

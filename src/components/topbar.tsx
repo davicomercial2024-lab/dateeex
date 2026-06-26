@@ -25,12 +25,17 @@ interface TopbarProps {
   onOpenMobileSidebar: () => void;
 }
 
-export function Topbar({ user, organization, onOpenMobileSidebar }: TopbarProps) {
+export function Topbar({ user, onOpenMobileSidebar }: TopbarProps) {
   const pathname = usePathname();
   const router = useRouter();
   const { theme, setTheme } = useTheme();
   const { accounts, selectedAccountId, isSyncing, syncProgress, triggerSync } = useMeli();
   const syncingAccounts = accounts.filter((account) => account.lastSyncStatus === "SYNCING");
+  const primarySyncingAccount =
+    syncingAccounts.find((account) => account.id === selectedAccountId) ||
+    syncingAccounts[0] ||
+    null;
+  const primarySyncProgress = primarySyncingAccount?.lastSyncProgress ?? syncProgress;
 
   const [mounted, setMounted] = useState(false);
   const [isProfileOpen, setIsProfileOpen] = useState(false);
@@ -82,6 +87,8 @@ export function Topbar({ user, organization, onOpenMobileSidebar }: TopbarProps)
         return "Reputacao";
       case "publicidade":
         return "Publicidade";
+      case "inteligencia-mercado":
+        return "Inteligencia de Mercado";
       case "ia":
         return "Inteligencia Artificial";
       default:
@@ -115,11 +122,11 @@ export function Topbar({ user, organization, onOpenMobileSidebar }: TopbarProps)
       setToast({
         show: true,
         type: "success",
-        title: "Sincronizacao concluida",
+        title: "Sincronizacao iniciada",
         description:
           selectedAccountId === "all"
-            ? "Todas as contas integradas foram atualizadas com o banco PostgreSQL local."
-            : "A conta selecionada foi sincronizada no banco local.",
+            ? "As contas integradas entraram na fila de sincronizacao em segundo plano."
+            : "A conta selecionada entrou na fila de sincronizacao em segundo plano.",
       });
     } catch (err: any) {
       setToast({
@@ -233,19 +240,19 @@ export function Topbar({ user, organization, onOpenMobileSidebar }: TopbarProps)
 
               <button
                 onClick={() => {
-                  alert(`Organizacao: ${organization?.name || "Datex"}\nFuncao: ${user?.role === "ADMIN" ? "Administrador" : "Membro"}`);
                   setIsProfileOpen(false);
+                  router.push(user?.role === "ADMIN" ? "/admin/usuarios" : "/configuracoes");
                 }}
                 className="flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-xs font-medium text-muted-foreground transition-all hover:bg-accent hover:text-foreground"
               >
                 <User className="h-4 w-4 text-primary" />
-                <span>Organizacao</span>
+                <span>{user?.role === "ADMIN" ? "Usuarios da conta" : "Organizacao"}</span>
               </button>
 
               <button
                 onClick={() => {
-                  alert(`Configuracoes de ${organization?.name || "Datex"}`);
                   setIsProfileOpen(false);
+                  router.push("/configuracoes");
                 }}
                 className="flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-xs font-medium text-muted-foreground transition-all hover:bg-accent hover:text-foreground"
               >
@@ -272,7 +279,9 @@ export function Topbar({ user, organization, onOpenMobileSidebar }: TopbarProps)
         <div className="border-t border-border/40 bg-card/85 px-4 py-3 sm:px-6">
           <SyncProgress
             compact
-            progress={syncProgress}
+            account={primarySyncingAccount ?? undefined}
+            progress={primarySyncProgress}
+            syncedAccountsCount={syncingAccounts.length}
             label={
               syncingAccounts.length === 1
                 ? `Sincronizando ${syncingAccounts[0].displayName}`

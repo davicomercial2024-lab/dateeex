@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useCallback, Suspense, useRef } from "react";
+import React, { useState, useEffect, useCallback, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import {
   Link2, Plus, RefreshCw, AlertTriangle, CheckCircle2, XCircle,
@@ -139,200 +139,16 @@ function EditNicknameModal({
 }
 
 // ─── Modal de Sincronização Fracionada ────────────────────────────────────────
-function SyncModal({
-  account,
-  onComplete,
-  onCancel,
-}: {
-  account: MeliAccount;
-  onComplete: () => void;
-  onCancel: () => void;
-}) {
-  const [step, setStep] = useState<"details" | "listings" | "orders" | "questions" | "done">("details");
-  const [progress, setProgress] = useState(0);
-  const [error, setError] = useState<string | null>(null);
-
-  const [counters, setCounters] = useState({ listings: 0, orders: 0, questions: 0 });
-
-  const onCompleteRef = useRef(onComplete);
-  useEffect(() => { onCompleteRef.current = onComplete; }, [onComplete]);
-
-  useEffect(() => {
-    let isCancelled = false;
-
-    const runSync = async () => {
-      try {
-        // Step 1: Details
-        if (isCancelled) return;
-        setStep("details");
-        setProgress(5);
-        await fetch(`/api/mercado-livre/accounts/${account.id}/sync-chunk`, {
-          method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ step: "details" }),
-        });
-        setProgress(10);
-
-        // Step 2: Listings
-        let offset = 0;
-        let scrollId: string | undefined = undefined;
-        let hasMore = true;
-        setStep("listings");
-        while (hasMore && !isCancelled) {
-          const resListings: Response = await fetch(`/api/mercado-livre/accounts/${account.id}/sync-chunk`, {
-            method: "POST", headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ step: "listings", scrollId, offset, limit: 50 }),
-          });
-          const data = await resListings.json();
-          if (!data.success) throw new Error(data.error);
-          hasMore = data.hasMore;
-          scrollId = data.scrollId;
-          offset += 50;
-          
-          setCounters(c => ({ ...c, listings: Math.min(offset, data.total) }));
-          const p = data.total > 0 ? (Math.min(offset, data.total) / data.total) * 100 : 100;
-          setProgress(10 + p * 0.3); // Ocupa 30% da barra
-        }
-
-        // Step 3: Orders
-        offset = 0;
-        hasMore = true;
-        setStep("orders");
-        while (hasMore && !isCancelled) {
-          const resOrders: Response = await fetch(`/api/mercado-livre/accounts/${account.id}/sync-chunk`, {
-            method: "POST", headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ step: "orders", offset, limit: 50 }),
-          });
-          const data = await resOrders.json();
-          if (!data.success) throw new Error(data.error);
-          hasMore = data.hasMore;
-          offset += 50;
-          
-          setCounters(c => ({ ...c, orders: Math.min(offset, data.total) }));
-          const p = data.total > 0 ? (Math.min(offset, data.total) / data.total) * 100 : 100;
-          setProgress(40 + p * 0.4); // Ocupa 40% da barra
-        }
-
-        // Step 4: Questions
-        offset = 0;
-        hasMore = true;
-        setStep("questions");
-        while (hasMore && !isCancelled) {
-          const resQuestions: Response = await fetch(`/api/mercado-livre/accounts/${account.id}/sync-chunk`, {
-            method: "POST", headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ step: "questions", offset, limit: 50 }),
-          });
-          const data = await resQuestions.json();
-          if (!data.success) throw new Error(data.error);
-          hasMore = data.hasMore;
-          offset += 50;
-          
-          setCounters(c => ({ ...c, questions: Math.min(offset, data.total) }));
-          const p = data.total > 0 ? (Math.min(offset, data.total) / data.total) * 100 : 100;
-          setProgress(80 + p * 0.2); // Ocupa 20% da barra
-        }
-
-        if (isCancelled) return;
-        setStep("done");
-        setProgress(100);
-        setTimeout(() => {
-          if (!isCancelled) onCompleteRef.current();
-        }, 1500);
-
-      } catch (err: any) {
-        if (!isCancelled) setError(err.message || "Falha na sincronização.");
-      }
-    };
-
-    runSync();
-
-    return () => { isCancelled = true; };
-  }, [account.id]);
-
-  const stepLabels = {
-    details: "Atualizando dados da conta...",
-    listings: "Sincronizando anúncios...",
-    orders: "Sincronizando vendas...",
-    questions: "Sincronizando perguntas...",
-    done: "Sincronização concluída!"
-  };
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/90 backdrop-blur-md animate-in fade-in duration-200">
-      <div className="relative w-full max-w-md mx-4 rounded-2xl border border-sky-500/30 bg-card shadow-2xl p-6 animate-in zoom-in-95 duration-200 overflow-hidden">
-        {/* Glow effect */}
-        <div className="absolute top-0 inset-x-0 h-px bg-gradient-to-r from-transparent via-sky-500/50 to-transparent" />
-        <div className="absolute -top-24 -right-24 w-48 h-48 bg-sky-500/10 rounded-full blur-3xl pointer-events-none" />
-
-        <div className="flex items-center gap-4 mb-6 relative">
-          <div className="p-3 rounded-2xl bg-sky-500/10 border border-sky-500/20 shadow-inner">
-            <RefreshCw className={`w-6 h-6 text-sky-500 ${step !== "done" && !error ? "animate-spin" : ""}`} />
-          </div>
-          <div>
-            <h3 className="text-lg font-extrabold text-foreground tracking-tight">Sincronizando Conta</h3>
-            <p className="text-xs text-muted-foreground font-medium">{account.displayName}</p>
-          </div>
-        </div>
-
-        {error ? (
-          <div className="space-y-4 relative">
-            <div className="p-4 rounded-xl border border-destructive/20 bg-destructive/5 text-destructive text-sm flex gap-3">
-              <AlertTriangle className="w-5 h-5 shrink-0" />
-              <div>
-                <p className="font-bold mb-1">A sincronização parou devido a um erro.</p>
-                <p className="opacity-90">{error}</p>
-              </div>
-            </div>
-            <div className="flex justify-end gap-2">
-              <Button onClick={onCancel} variant="outline" className="rounded-xl">Fechar</Button>
-            </div>
-          </div>
-        ) : (
-          <div className="space-y-6 relative">
-            <div className="space-y-2">
-              <div className="flex justify-between text-xs font-bold">
-                <span className="text-sky-600 dark:text-sky-400 uppercase tracking-wider">{stepLabels[step]}</span>
-                <span className="text-foreground">{Math.floor(progress)}%</span>
-              </div>
-              <div className="relative h-3 overflow-hidden rounded-full bg-secondary/50 shadow-inner">
-                <div 
-                  className="absolute inset-y-0 left-0 bg-gradient-to-r from-sky-400 to-sky-600 transition-all duration-300 ease-out"
-                  style={{ width: `${progress}%` }}
-                >
-                  <div className="absolute inset-0 bg-white/20 w-full animate-[shimmer_1s_infinite] -skew-x-12" />
-                </div>
-              </div>
-            </div>
-
-            <div className="grid grid-cols-3 gap-3 border-t border-border/40 pt-4">
-              <div className="text-center space-y-1">
-                <p className="text-[10px] text-muted-foreground font-bold uppercase">Anúncios</p>
-                <p className="text-lg font-black text-foreground">{counters.listings}</p>
-              </div>
-              <div className="text-center space-y-1">
-                <p className="text-[10px] text-muted-foreground font-bold uppercase">Vendas</p>
-                <p className="text-lg font-black text-foreground">{counters.orders}</p>
-              </div>
-              <div className="text-center space-y-1">
-                <p className="text-[10px] text-muted-foreground font-bold uppercase">Perguntas</p>
-                <p className="text-lg font-black text-foreground">{counters.questions}</p>
-              </div>
-            </div>
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-// ─── Card de Conta ────────────────────────────────────────────────────────────
 function AccountCard({
   account,
   onRefresh,
   onStartSync,
+  isStartingSync,
 }: {
   account: MeliAccount;
   onRefresh: () => Promise<void>;
   onStartSync: (account: MeliAccount) => void;
+  isStartingSync?: boolean;
 }) {
   const [showError, setShowError] = useState(false);
   const [isTesting, setIsTesting] = useState(false);
@@ -366,7 +182,7 @@ function AccountCard({
     try {
       const res = await fetch(`/api/mercado-livre/accounts/${account.id}`, { method: "DELETE" });
       if (!res.ok) {
-        const d = await res.json();
+        const d = await res.json().catch(() => ({}));
         throw new Error(d.error || "Erro ao desconectar.");
       }
       setShowDisconnectModal(false);
@@ -551,10 +367,10 @@ function AccountCard({
           {/* Botões de ação */}
           <div className="flex flex-col gap-2 mt-auto pt-2 border-t border-border/30">
             <div className="grid grid-cols-2 gap-2">
-              <Button onClick={() => onStartSync(account)} disabled={account.lastSyncStatus === "SYNCING"}
+              <Button onClick={() => onStartSync(account)} disabled={isStartingSync || account.lastSyncStatus === "SYNCING"}
                 size="sm" className="rounded-xl text-xs gap-1.5">
-                <RefreshCw className="w-3.5 h-3.5" />
-                Sincronizar
+                <RefreshCw className={`w-3.5 h-3.5 ${isStartingSync || account.lastSyncStatus === "SYNCING" ? "animate-spin" : ""}`} />
+                {isStartingSync ? "Iniciando..." : account.lastSyncStatus === "SYNCING" ? "Rodando" : "Sincronizar"}
               </Button>
               <Button onClick={handleTest} disabled={isTesting}
                 variant="outline" size="sm" className="rounded-xl text-xs gap-1.5">
@@ -643,7 +459,8 @@ export default function ContasMercadoLivrePage() {
   const { accounts, refreshAccounts, connectViaOAuth } = useMeli();
   const [isLoading, setIsLoading] = useState(true);
   const [isConnecting, setIsConnecting] = useState(false);
-  const [syncingAccount, setSyncingAccount] = useState<MeliAccount | null>(null);
+  const [startingSyncId, setStartingSyncId] = useState<string | null>(null);
+  const [backgroundNotice, setBackgroundNotice] = useState<string | null>(null);
 
   const searchParams = useSearchParams();
   const startSyncId = searchParams.get("accountId");
@@ -662,17 +479,51 @@ export default function ContasMercadoLivrePage() {
     loadAccounts();
   }, [loadAccounts]);
 
+  useEffect(() => {
+    const hasSyncingAccount = accounts.some((account) => account.lastSyncStatus === "SYNCING");
+    if (!hasSyncingAccount) return;
+
+    const interval = window.setInterval(() => {
+      refreshAccounts();
+    }, 3500);
+
+    return () => window.clearInterval(interval);
+  }, [accounts, refreshAccounts]);
+
+  const handleStartSync = useCallback(async (account: MeliAccount) => {
+    try {
+      setStartingSyncId(account.id);
+      setBackgroundNotice(null);
+
+      const res = await fetch(`/api/mercado-livre/accounts/${account.id}/sync-background`, {
+        method: "POST",
+      });
+      const data = await res.json().catch(() => ({}));
+
+      if (!res.ok) {
+        throw new Error(data.error || "Nao foi possivel iniciar a sincronizacao.");
+      }
+
+      setBackgroundNotice(data.message || "Sincronizacao iniciada em segundo plano.");
+      await refreshAccounts();
+    } catch (err: any) {
+      alert(err.message || "Falha ao iniciar sincronizacao.");
+    } finally {
+      setStartingSyncId(null);
+    }
+  }, [refreshAccounts]);
+
   // Auto-start sync if redirected from OAuth callback
   useEffect(() => {
     if (shouldStartSync && startSyncId && accounts.length > 0) {
       const account = accounts.find(a => a.id === startSyncId);
       if (account) {
-        setSyncingAccount(account);
+        handleStartSync(account);
         // Remove os parâmetros da URL para não ficar em loop ao recarregar a página
         window.history.replaceState({}, document.title, window.location.pathname);
       }
     }
-  }, [shouldStartSync, startSyncId, accounts]);
+  }, [shouldStartSync, startSyncId, accounts, handleStartSync]);
 
   const handleConnect = async () => {
     try {
@@ -684,24 +535,8 @@ export default function ContasMercadoLivrePage() {
     }
   };
 
-  const handleStartSync = (account: MeliAccount) => {
-    setSyncingAccount(account);
-  };
-
-  const handleSyncComplete = async () => {
-    setSyncingAccount(null);
-    await loadAccounts();
-  };
-
   return (
     <>
-      {syncingAccount && (
-        <SyncModal
-          account={syncingAccount}
-          onComplete={handleSyncComplete}
-          onCancel={() => setSyncingAccount(null)}
-        />
-      )}
       <div className="space-y-8 animate-in fade-in duration-500 pb-10">
         {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 border-b border-border/40 pb-5">
@@ -741,6 +576,12 @@ export default function ContasMercadoLivrePage() {
           Os tokens são salvos de forma segura e renovados automaticamente.
         </div>
       </div>
+
+      {backgroundNotice && (
+        <div className="rounded-2xl border border-sky-500/25 bg-sky-500/10 px-4 py-3 text-sm font-semibold text-sky-700 dark:text-sky-300">
+          {backgroundNotice} Voce pode continuar usando o sistema enquanto o Datex trabalha.
+        </div>
+      )}
 
       {/* Loading */}
       {isLoading ? (
@@ -785,7 +626,13 @@ export default function ContasMercadoLivrePage() {
         /* Grid de contas */
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           {accounts.map((account) => (
-            <AccountCard key={account.id} account={account} onRefresh={loadAccounts} onStartSync={handleStartSync} />
+            <AccountCard
+              key={account.id}
+              account={account}
+              onRefresh={loadAccounts}
+              onStartSync={handleStartSync}
+              isStartingSync={startingSyncId === account.id}
+            />
           ))}
           {/* Card para adicionar nova conta */}
           <button

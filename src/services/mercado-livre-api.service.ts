@@ -211,21 +211,29 @@ export class MercadoLivreApiService {
 
   private static async request<T>(endpoint: string, accessToken: string, options: RequestInit = {}): Promise<T> {
     const url = `${this.BASE_URL}${endpoint}`;
-    const headers = {
-      Authorization: `Bearer ${accessToken}`,
-      Accept: "application/json",
-      "Content-Type": "application/json",
-      ...options.headers,
-    };
+    
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 30000);
 
-    const response = await fetch(url, { ...options, headers });
+    try {
+      const headers = {
+        Authorization: `Bearer ${accessToken}`,
+        Accept: "application/json",
+        "Content-Type": "application/json",
+        ...options.headers,
+      };
 
-    if (!response.ok) {
-      const errorText = await response.text().catch(() => "Sem detalhes do erro");
-      throw new Error(`Meli API Error [${response.status}]: ${errorText}`);
+      const response = await fetch(url, { ...options, signal: controller.signal, headers });
+
+      if (!response.ok) {
+        const errorText = await response.text().catch(() => "Sem detalhes do erro");
+        throw new Error(`Meli API Error [${response.status}]: ${errorText}`);
+      }
+
+      return response.json() as Promise<T>;
+    } finally {
+      clearTimeout(timeoutId);
     }
-
-    return response.json() as Promise<T>;
   }
 
   private static async advertisingRequest<T>(
@@ -364,18 +372,24 @@ export class MercadoLivreApiService {
       throw new Error("Credenciais do Mercado Livre não configuradas no .env");
     }
 
+    if (!refreshToken || refreshToken === "undefined" || refreshToken === "null") {
+      throw new Error("Refresh token ausente. Reconecte a conta Mercado Livre.");
+    }
+
+    const body = new URLSearchParams({
+      grant_type: "refresh_token",
+      client_id: clientId,
+      client_secret: clientSecret,
+      refresh_token: refreshToken,
+    });
+
     const response = await fetch("https://api.mercadolibre.com/oauth/token", {
       method: "POST",
       headers: {
+        "Accept": "application/json",
         "Content-Type": "application/x-www-form-urlencoded",
-        Accept: "application/json",
       },
-      body: new URLSearchParams({
-        grant_type: "refresh_token",
-        client_id: clientId,
-        client_secret: clientSecret,
-        refresh_token: refreshToken,
-      }).toString(),
+      body,
     });
 
     if (!response.ok) {
@@ -400,34 +414,40 @@ export class MercadoLivreApiService {
     let total = 0;
     let nextScrollId = scrollId;
     
-    try {
-      let url = `/users/${meliUserId}/items/search?search_type=scan&limit=${limit}`;
-      if (scrollId) {
-        url += `&scroll_id=${scrollId}`;
+    let remaining = limit;
+    while (remaining > 0) {
+      const fetchSize = Math.min(remaining, 100); // ML search API limit is 100
+      let url = `/users/${meliUserId}/items/search?search_type=scan&limit=${fetchSize}`;
+      if (nextScrollId) {
+        url += `&scroll_id=${nextScrollId}`;
       }
       
       const searchRes = await this.request<SearchResult>(url, accessToken);
       if (searchRes.results && searchRes.results.length > 0) {
         allIds.push(...searchRes.results);
+      } else {
+        break; // No more items
       }
-      total = searchRes.paging?.total || 0;
+      
+      total = searchRes.paging?.total || total;
       nextScrollId = searchRes.scroll_id || undefined;
-    } catch (e) {
-      console.warn(`Erro na busca de items (chunk):`, e);
+      remaining -= fetchSize;
+      
+      if (!nextScrollId) break; // In case scroll_id is not returned
     }
 
     if (allIds.length === 0) return { items: [], scrollId: nextScrollId, total };
 
-    // Faz o multiget em lotes de 20
+    // Faz o multiget em lotes de 50 (ML suporta até 50 no /items)
     const batches: string[][] = [];
     const idsToProcess = [...allIds];
     while (idsToProcess.length > 0) {
-      batches.push(idsToProcess.splice(0, 20));
+      batches.push(idsToProcess.splice(0, 50));
     }
 
     const items: MeliItemPayload[] = [];
     
-    const chunkSize = 5;
+    const chunkSize = 10; // Dispara 10 requisições simultâneas de 50 itens = 500 itens em paralelo
     for (let i = 0; i < batches.length; i += chunkSize) {
       const chunk = batches.slice(i, i + chunkSize);
       const promises = chunk.map(batch => {
@@ -460,17 +480,22 @@ export class MercadoLivreApiService {
     const allOrders: MeliOrderPayload[] = [];
     let total = 0;
 
-    try {
+    let remaining = limit;
+    let currentOffset = offset;
+    while (remaining > 0) {
+      const fetchSize = Math.min(remaining, 50); // ML orders API limit is 50
       const searchRes = await this.request<SearchResult>(
-        `/orders/search?seller=${meliUserId}&limit=${limit}&offset=${offset}`,
+        `/orders/search?seller=${meliUserId}&limit=${fetchSize}&offset=${currentOffset}`,
         accessToken
       );
       if (searchRes.results && searchRes.results.length > 0) {
         allOrders.push(...searchRes.results);
+      } else {
+        break;
       }
-      total = searchRes.paging?.total || 0;
-    } catch (e) {
-      console.warn(`Erro na busca de orders (chunk):`, e);
+      total = searchRes.paging?.total || total;
+      currentOffset += fetchSize;
+      remaining -= fetchSize;
     }
 
     return { orders: allOrders, total };
@@ -506,19 +531,30 @@ export class MercadoLivreApiService {
       total: number;
     }
 
-    try {
+    const allQuestions: MeliQuestionPayload[] = [];
+    let total = 0;
+
+    let remaining = limit;
+    let currentOffset = offset;
+    while (remaining > 0) {
+      const fetchSize = Math.min(remaining, 50); // ML questions API limit is 50
       const searchRes = await this.request<SearchResult>(
-        `/questions/search?seller_id=${meliUserId}&limit=${limit}&offset=${offset}`,
+        `/questions/search?seller_id=${meliUserId}&limit=${fetchSize}&offset=${currentOffset}`,
         accessToken
       );
-      return {
-        questions: searchRes.questions || [],
-        total: searchRes.total || 0
-      };
-    } catch (e) {
-      console.warn(`Erro na busca de questions (chunk):`, e);
-      return { questions: [], total: 0 };
+      if (searchRes.questions && searchRes.questions.length > 0) {
+        allQuestions.push(...searchRes.questions);
+      } else {
+        break;
+      }
+      total = searchRes.total || total;
+      currentOffset += fetchSize;
+      remaining -= fetchSize;
     }
+    return {
+      questions: allQuestions,
+      total: total
+    };
   }
 
   /**

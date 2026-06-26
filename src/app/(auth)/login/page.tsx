@@ -90,16 +90,9 @@ export default function LoginPage() {
                 <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-1.5">
                   <Lock className="w-3.5 h-3.5" /> Senha
                 </label>
-                <a
-                  href="#"
-                  onClick={(e) => {
-                    e.preventDefault();
-                    alert("A recuperação de senha estará disponível em breve!");
-                  }}
-                  className="text-xs font-medium text-primary hover:underline"
-                >
-                  Esqueceu a senha?
-                </a>
+                <span className="text-xs font-medium text-muted-foreground/70">
+                  Recuperacao indisponivel
+                </span>
               </div>
               <Input
                 type="password"

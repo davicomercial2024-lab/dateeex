@@ -38,6 +38,7 @@ export const config = {
     "/publicidade/:path*",
     "/ads/:path*",
     "/promocoes/:path*",
+    "/inteligencia-mercado/:path*",
     "/ia/:path*",
     "/configuracoes/:path*",
   ],

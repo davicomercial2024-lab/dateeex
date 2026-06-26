@@ -9,6 +9,7 @@ export async function POST(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  let accountId: string | null = null;
   try {
     const cookieStore = await cookies();
     const session = cookieStore.get("datex_session");
@@ -20,7 +21,8 @@ export async function POST(
 
     await pbAdmin.admins.authWithPassword(process.env.PB_ADMIN_EMAIL as string, process.env.PB_ADMIN_PASS as string);
 
-    const { id: accountId } = await params;
+    const { id } = await params;
+    accountId = id;
     if (!accountId) {
       return NextResponse.json({ error: "Missing account ID" }, { status: 400 });
     }
@@ -66,6 +68,12 @@ export async function POST(
     if (error.response) {
       console.error("[Sync Chunk Error Response]:", JSON.stringify(error.response, null, 2));
     }
-    return NextResponse.json({ error: `${error.message} - STACK: ${error.stack}` }, { status: 500 });
+    if (accountId) {
+      await pbAdmin.collection("mercado_livre_accounts").update(accountId, {
+        lastSyncStatus: "FAILED",
+        lastSyncError: error.message || "Falha na sincronizacao.",
+      }, { requestKey: null }).catch(() => null);
+    }
+    return NextResponse.json({ error: error.message || "Falha na sincronizacao." }, { status: 500 });
   }
 }

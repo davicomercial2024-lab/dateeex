@@ -8,6 +8,7 @@ type SyncProgressProps = {
   label?: string;
   compact?: boolean;
   progress?: number;
+  syncedAccountsCount?: number;
 };
 
 function clampProgress(value: number) {
@@ -23,7 +24,15 @@ function getDefaultProgress(account?: MeliAccount) {
   return 100;
 }
 
-export function SyncProgress({ account, label, compact = false, progress }: SyncProgressProps) {
+function getPhase(progress: number) {
+  if (progress >= 100) return "Sincronizacao concluida";
+  if (progress >= 85) return "Sincronizando perguntas";
+  if (progress >= 60) return "Sincronizando vendas";
+  if (progress >= 8) return "Sincronizando anuncios";
+  return "Atualizando dados da conta";
+}
+
+export function SyncProgress({ account, label, compact = false, progress, syncedAccountsCount }: SyncProgressProps) {
   const counts = account?.counts;
   const resolvedProgress = clampProgress(progress ?? getDefaultProgress(account));
   const title = label ?? "Sincronizacao em andamento";
@@ -38,6 +47,7 @@ export function SyncProgress({ account, label, compact = false, progress }: Sync
           : resolvedProgress >= 30
             ? "Processando integrações"
             : "Preparando sincronizacao";
+  const phaseText = getPhase(resolvedProgress);
 
   return (
     <div
@@ -56,7 +66,13 @@ export function SyncProgress({ account, label, compact = false, progress }: Sync
             </span>
             {!compact && (
               <span className="mt-0.5 block text-[10px] font-medium text-muted-foreground">
-                {statusText}
+                {phaseText}
+              </span>
+            )}
+            {compact && (
+              <span className="mt-0.5 block truncate text-[10px] font-medium text-muted-foreground">
+                {phaseText}
+                {syncedAccountsCount && syncedAccountsCount > 1 ? ` em ${syncedAccountsCount} contas` : ""}
               </span>
             )}
           </div>
@@ -80,7 +96,7 @@ export function SyncProgress({ account, label, compact = false, progress }: Sync
         )}
       </div>
 
-      {!compact && counts && (
+      {counts && (
         <div className="grid grid-cols-3 gap-2 text-[10px] text-muted-foreground">
           <span>
             <strong className="text-foreground">{counts.listings.toLocaleString("pt-BR")}</strong> anuncios

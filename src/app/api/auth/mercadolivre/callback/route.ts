@@ -3,6 +3,7 @@ import { cookies } from "next/headers";
 import { pbAdmin } from "@/lib/pb";
 import { verifyOAuthState, verifyToken } from "@/lib/auth";
 import { MercadoLivreApiService } from "@/services/mercado-livre-api.service";
+import { MercadoLivreBackgroundSyncService } from "@/services/mercado-livre-background-sync.service";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -76,19 +77,21 @@ export async function GET(request: Request) {
     }
 
     console.log("[ML Callback] Trocando code por token...");
+    const tokenBody = new URLSearchParams({
+      grant_type: "authorization_code",
+      client_id: clientId,
+      client_secret: clientSecret,
+      code,
+      redirect_uri: redirectUri,
+    });
+
     const tokenResponse = await fetch("https://api.mercadolibre.com/oauth/token", {
       method: "POST",
       headers: {
+        "Accept": "application/json",
         "Content-Type": "application/x-www-form-urlencoded",
-        Accept: "application/json",
       },
-      body: new URLSearchParams({
-        grant_type: "authorization_code",
-        client_id: clientId,
-        client_secret: clientSecret,
-        code,
-        redirect_uri: redirectUri,
-      }).toString(),
+      body: tokenBody,
     });
 
     if (!tokenResponse.ok) {
@@ -150,10 +153,11 @@ export async function GET(request: Request) {
     } catch (e) {}
 
     const existingToken = existingAccount?.expand?.["oauth_tokens(account)"]?.[0];
-    const persistedRefreshToken = refreshToken || existingToken?.refreshToken || accessToken;
+    const persistedRefreshToken = refreshToken || existingToken?.refreshToken;
 
     if (!refreshToken && !existingToken?.refreshToken) {
-      console.warn("[ML Callback] Mercado Livre nao retornou refresh_token; usando access_token como token temporario.");
+      console.warn("[ML Callback] Mercado Livre nao retornou refresh_token e nao existe refresh_token anterior.");
+      return redirectWithClearedState(`${redirectBase}?error=missing_refresh_token`, request.url);
     }
 
     let account;
@@ -200,7 +204,7 @@ export async function GET(request: Request) {
       await pbAdmin.collection("oauth_tokens").create({
         account: account.id,
         accessToken,
-        refreshToken: persistedRefreshToken,
+        refreshToken: persistedRefreshToken as string,
         expiresAt,
         scope: scope || null,
         tokenType: tokenType || "bearer",
@@ -222,9 +226,7 @@ export async function GET(request: Request) {
 
     const finalAccountId = accountId;
 
-    await pbAdmin.collection("mercado_livre_accounts").update(finalAccountId, {
-      lastSyncStatus: "SYNCING",
-    });
+    MercadoLivreBackgroundSyncService.start(finalAccountId, payload.orgId);
 
     // Removida a sincronização total síncrona para evitar timeout da Netlify (10s)
     // A sincronização real será disparada de forma fracionada pelo frontend no dashboard

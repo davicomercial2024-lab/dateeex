@@ -18,6 +18,7 @@ import {
   ChevronDown,
   BadgePercent,
   CircleDollarSign,
+  Search,
   Ticket,
   Tag,
   Users,
@@ -38,6 +39,7 @@ export function Sidebar({ className, isOpenMobile, onCloseMobile, user }: Sideba
     { name: "DASHBOARD", href: "/dashboard", icon: LayoutDashboard },
     { name: "ANÚNCIOS", href: "/anuncios", icon: ShoppingBag },
     { name: "VENDAS", href: "/vendas", icon: TrendingUp },
+    { name: "INTELIGENCIA DE MERCADO", href: "/inteligencia-mercado", icon: Search },
     { name: "REPUTAÇÃO", href: "/reputacao", icon: Award },
     { name: "INTELIGÊNCIA ARTIFICIAL", href: "/ia", icon: Cpu },
   ];
