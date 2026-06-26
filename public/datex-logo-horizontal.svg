@@ -1,0 +1,44 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1400" height="500" viewBox="0 0 1400 500" role="img" aria-label="Datex logo">
+
+<defs>
+  <linearGradient id="dxBlue" x1="0%" y1="0%" x2="100%" y2="100%">
+    <stop offset="0%" stop-color="#25B6FF"/>
+    <stop offset="45%" stop-color="#2F6BFF"/>
+    <stop offset="100%" stop-color="#214BFF"/>
+  </linearGradient>
+  <linearGradient id="dxCyan" x1="0%" y1="0%" x2="100%" y2="100%">
+    <stop offset="0%" stop-color="#25F2FF"/>
+    <stop offset="100%" stop-color="#0A83FF"/>
+  </linearGradient>
+  <linearGradient id="wordX" x1="0%" y1="0%" x2="100%" y2="100%">
+    <stop offset="0%" stop-color="#31F0FF"/>
+    <stop offset="100%" stop-color="#1479FF"/>
+  </linearGradient>
+  <filter id="softGlow" x="-30%" y="-30%" width="160%" height="160%">
+    <feGaussianBlur stdDeviation="5" result="blur"/>
+    <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+  </filter>
+</defs>
+
+<rect width="1400" height="500" fill="transparent"/>
+
+<g transform="translate(85,100) scale(1.35)">
+  <!-- D + X monogram -->
+  <path fill="url(#dxBlue)" fill-rule="evenodd" d="M20 20 H155 C223 20 262 72 262 110 C262 148 223 200 155 200 H20 Z
+    M62 70 H150 C184 70 210 90 224 110 C210 130 184 150 150 150 H62 Z"/>
+  <path fill="url(#dxBlue)" d="M214 28 H278 L365 200 H301 Z" transform="skewX(-6)"/>
+  <path fill="url(#dxCyan)" d="M300 20 H360 L292 102 H235 Z"/>
+  <!-- data grid -->
+  <rect x="82" y="77" width="25" height="25" rx="2" fill="#1E55FF"/>
+  <rect x="119" y="77" width="25" height="25" rx="2" fill="#2569FF"/>
+  <rect x="156" y="77" width="25" height="25" rx="2" fill="#2F8DFF"/>
+  <rect x="82" y="115" width="25" height="25" rx="2" fill="#2B86FF"/>
+  <rect x="119" y="115" width="25" height="25" rx="2" fill="#214BFF"/>
+  <rect x="156" y="115" width="25" height="25" rx="2" fill="#27E8F2"/>
+  <rect x="82" y="153" width="25" height="25" rx="2" fill="#224BFF"/>
+  <rect x="119" y="153" width="25" height="25" rx="2" fill="#2E7BFF"/>
+  <rect x="156" y="153" width="25" height="25" rx="2" fill="#1C3AE0"/>
+</g>
+<text x="610" y="270" font-family="Inter, Montserrat, Arial, sans-serif" font-size="150" font-weight="800" letter-spacing="-6" fill="#F7FAFF">Date<tspan fill="url(#wordX)">x</tspan></text>
+<text x="615" y="345" font-family="Inter, Montserrat, Arial, sans-serif" font-size="36" font-weight="600" letter-spacing="18" fill="#2D86FF">GESTÃO INTELIGENTE</text>
+</svg>

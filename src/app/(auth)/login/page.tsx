@@ -52,11 +52,12 @@ export default function LoginPage() {
       <div className="flex-1 flex flex-col justify-center px-8 md:px-16 lg:px-24 py-12">
         <div className="w-full max-w-md mx-auto">
           {/* Logo */}
-          <div className="flex items-center gap-2 mb-12">
-            <div className="flex items-center justify-center w-9 h-9 rounded-lg bg-primary text-primary-foreground font-black text-xl shadow-md">
-              D
-            </div>
-            <span className="font-extrabold text-2xl tracking-wider">Datex</span>
+          <div className="flex items-center mb-12">
+            <img 
+              src="/datex-logo-horizontal.svg" 
+              alt="Datex Logo" 
+              className="h-10 w-auto"
+            />
           </div>
 
           {/* Titles */}

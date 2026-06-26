@@ -66,18 +66,12 @@ export function Sidebar({ className, isOpenMobile, onCloseMobile, user }: Sideba
   const sidebarContent = (
     <div className="flex h-full flex-col border-r border-border/50 bg-card/75 shadow-xl shadow-background/50 backdrop-blur-2xl">
       <div className="flex items-center justify-between border-b border-border/40 px-6 py-6">
-        <Link href="/dashboard" className="flex items-center gap-3 group">
-          <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-tr from-primary to-indigo-500 text-xl font-black text-white shadow-lg shadow-primary/35 transition-transform group-hover:rotate-3 group-hover:scale-105">
-            D
-          </div>
-          <div className="flex flex-col">
-            <span className="text-xl font-extrabold leading-none tracking-tight bg-clip-text text-transparent bg-gradient-to-r from-foreground via-foreground/90 to-foreground/80">
-              Datex
-            </span>
-            <span className="mt-0.5 text-[10px] font-bold uppercase tracking-widest text-primary opacity-90">
-              MeliOps SaaS
-            </span>
-          </div>
+        <Link href="/dashboard" className="flex items-center group transition-transform hover:scale-105">
+          <img 
+            src="/datex-logo-horizontal.svg" 
+            alt="Datex Logo" 
+            className="h-8 w-auto"
+          />
         </Link>
         {onCloseMobile && (
           <button

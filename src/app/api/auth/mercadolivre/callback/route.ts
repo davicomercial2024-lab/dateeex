@@ -153,11 +153,10 @@ export async function GET(request: Request) {
     } catch (e) {}
 
     const existingToken = existingAccount?.expand?.["oauth_tokens(account)"]?.[0];
-    const persistedRefreshToken = refreshToken || existingToken?.refreshToken;
+    const persistedRefreshToken = refreshToken || existingToken?.refreshToken || "";
 
     if (!refreshToken && !existingToken?.refreshToken) {
-      console.warn("[ML Callback] Mercado Livre nao retornou refresh_token e nao existe refresh_token anterior.");
-      return redirectWithClearedState(`${redirectBase}?error=missing_refresh_token`, request.url);
+      console.warn("[ML Callback] Mercado Livre nao retornou refresh_token e nao existe refresh_token anterior. Continuando sem refresh token.");
     }
 
     let account;
